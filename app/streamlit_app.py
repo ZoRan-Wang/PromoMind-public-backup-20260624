@@ -33,6 +33,15 @@ def load_demo_recommendations() -> pd.DataFrame:
     ]:
         data = load_csv(OUTPUTS / filename)
         if not data.empty:
+            data = data.rename(
+                columns={
+                    "user_id": "household_id",
+                    "item_id": "product_id",
+                    "score": "base_score",
+                    "rank": "final_rank",
+                    "discount_cost": "discount_cost_proxy",
+                }
+            )
             return data
     return pd.DataFrame()
 
@@ -61,9 +70,12 @@ def main() -> None:
 
     with left:
         st.subheader("Household Profile")
-        profile = household_features[
-            household_features["household_id"] == selected_household
-        ]
+        if "household_id" not in household_features.columns:
+            profile = pd.DataFrame()
+        else:
+            profile = household_features[
+                household_features["household_id"] == selected_household
+            ]
         if profile.empty:
             st.write("Profile not available.")
         else:
@@ -78,7 +90,11 @@ def main() -> None:
     elif "rank" in household_recs.columns:
         household_recs = household_recs.sort_values("rank")
 
-    if not product_features.empty and "product_id" in household_recs.columns:
+    if (
+        not product_features.empty
+        and "product_id" in household_recs.columns
+        and "product_id" in product_features.columns
+    ):
         household_recs = household_recs.merge(product_features, on="product_id", how="left")
 
     coupon_limit = max(1, round(budget / 10))
@@ -116,4 +132,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
