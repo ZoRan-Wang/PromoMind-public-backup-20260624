@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.venv/
+venv/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Local data: commit original Complete Journey raw files, not generated processed outputs
+data/raw/*.csv
+data/processed/*
+!data/processed/.gitkeep
+
+# Generated model artifacts and local outputs
+outputs/
+models_artifacts/
+*.pkl
+*.joblib
+*.parquet
+*.feather
+tmp_*.tar.gz
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

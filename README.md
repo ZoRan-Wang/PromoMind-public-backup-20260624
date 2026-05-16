@@ -1,21 +1,25 @@
 # PromoMind
 
-PromoMind is a proposal and project-management package for a promotion-aware grocery basket and coupon recommender system.
+PromoMind is a project skeleton, proposal package, and execution workspace for a promotion-aware grocery basket and coupon recommender system.
 
-The project idea is to predict the products each household is likely to buy next and then re-rank recommendations using promotion, coupon, discount-cost, diversity, and business-utility signals.
+The project predicts products each household is likely to buy next, then re-ranks recommendations using promotion exposure, coupon availability, discount-cost proxy, diversity, and business-utility signals.
 
-## Files
+## Repository Contents
 
-| File | Purpose |
+| Path | Purpose |
 | --- | --- |
 | `PromoMind_bilingual_proposal.docx` | Full bilingual proposal in Word format |
 | `PromoMind_bilingual_proposal.md` | Full bilingual proposal in Markdown |
 | `PromoMind_5_second_meeting_message.md` | Short meeting pitch |
 | `PromoMind_four_person_work_split.md` | Four-person work allocation |
 | `PromoMind_PM_team_execution_pack.md` | Detailed PM execution plan |
-| `PromoMind_task_board.csv` | Task board for tracking project execution |
+| `PromoMind_task_board.csv` | Task board for tracking execution |
 | `PromoMind_RACI_matrix.csv` | RACI ownership matrix |
-| `build_promomind_docs.py` | Script used to generate proposal artifacts |
+| `docs/` | Project plan, data dictionary, experiment protocol, and demo spec |
+| `src/promomind/` | Importable Python package for data preparation, models, reranking, and evaluation |
+| `scripts/` | Dataset export, preprocessing, and synthetic sample-data utilities |
+| `app/` | Streamlit demo shell |
+| `data/` | Complete Journey raw RDS/RDA files plus ignored generated processed outputs |
 | `rendered/` | Rendered DOCX page images used for layout QA |
 
 ## Proposed Project
@@ -35,12 +39,80 @@ The project idea is to predict the products each household is likely to buy next
 - recommendation-list diversity
 - business utility proxy
 
+## Setup
+
+Install the package in editable mode:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+Install optional recommender backends:
+
+```bash
+python -m pip install -e ".[dev,recommenders]"
+```
+
+Generate a tiny synthetic dataset for smoke tests:
+
+```bash
+python scripts/make_sample_data.py
+```
+
+Prepare processed files from CSV exports in `data/raw/`:
+
+```bash
+python scripts/prepare_dataset.py --raw-dir data/raw --processed-dir data/processed
+```
+
+Run tests:
+
+```bash
+pytest
+```
+
+Run the demo:
+
+```bash
+streamlit run app/streamlit_app.py
+```
+
+The original Complete Journey raw files are committed under `data/raw/completejourney/` because each file is below GitHub's 100MB limit in RDS/RDA format. Generated CSV exports and processed outputs remain ignored by Git.
+
+## Included Raw Data
+
+The repository includes these original Complete Journey artifacts:
+
+- `data/raw/completejourney/transactions.rds`
+- `data/raw/completejourney/promotions.rds`
+- `data/raw/completejourney/products.rda`
+- `data/raw/completejourney/coupons.rda`
+- `data/raw/completejourney/coupon_redemptions.rda`
+- `data/raw/completejourney/campaigns.rda`
+- `data/raw/completejourney/campaign_descriptions.rda`
+- `data/raw/completejourney/demographics.rda`
+- `data/raw/completejourney/transactions_sample.rda`
+- `data/raw/completejourney/promotions_sample.rda`
+
+## Expected Raw CSVs
+
+The preprocessing scripts expect CSV exports with these names:
+
+- `transactions.csv`
+- `products.csv`
+- `demographics.csv`
+- `promotions.csv`
+- `coupons.csv`
+- `coupon_redemptions.csv`
+
+Use `scripts/download_completejourney.R` as the R-side reference for exporting tables from the committed/package RDS/RDA data into local CSVs when needed.
+
 ## Team Workstreams
 
-- **A: Data Lead** — data cleaning, time split, EDA, feature tables.
-- **B: Model Lead** — popularity baselines, ItemKNN, ALS, BPR.
-- **C: Business/Reranking Lead** — promotion/coupon features, re-ranking, Business Utility@K.
-- **D: Integration/Demo Lead** — LightGCN attempt, Streamlit demo, final integration, PPT/report.
+- **A: Data Lead** - data cleaning, time split, EDA, feature tables.
+- **B: Model Lead** - popularity baselines, ItemKNN, ALS, BPR.
+- **C: Business/Reranking Lead** - promotion/coupon features, re-ranking, Business Utility@K.
+- **D: Integration/Demo Lead** - LightGCN attempt, Streamlit demo, final integration, PPT/report.
 
 ## Minimum Delivery Line
 
@@ -51,4 +123,3 @@ The minimum complete project is:
 3. Promotion-aware re-ranking.
 4. Business Utility@K evaluation.
 5. Streamlit demo and final presentation materials.
-
