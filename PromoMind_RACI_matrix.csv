@@ -1,0 +1,30 @@
+work_item,A_Data_Lead,B_Model_Lead,C_Reranking_Lead,D_Integration_Demo_Lead,notes
+Data access,A/R,I,I,I,A owns data availability
+Schema documentation,A/R,C,C,I,B and C consult for model feature needs
+Data cleaning,A/R,C,C,I,A owns cleaning rules
+Time-based split,A/R,C,C,I,No future leakage allowed
+Product features,A/R,C,C,C,Used by B category baseline C reranking D demo
+Household features,A/R,I,I,C,Used mainly by D demo
+EDA figures,A/R,I,C,I,C consults on coupon sparsity analysis
+Leakage audit,A/R,C,C,I,A accountable before final results
+Popularity baseline,I,B/R,I,I,B owns baseline implementation
+Category popularity,C,B/R,I,I,A consults on category fields
+ItemKNN,I,B/R,I,I,B owns traditional CF baseline
+Implicit ALS,I,B/R,I,I,ALS is mandatory main model
+BPR,I,B/R,I,I,BPR is standard line or bonus if time tight
+Candidate output format,C,B/R,C,C,B accountable for candidate schema
+Promotion features,C,I,C/R,I,C owns promotion construction
+Coupon features,C,I,C/R,I,C owns coupon/campaign construction
+Discount proxy,C,I,C/R,I,C owns revenue-minus-discount proxy
+Reranking formula,I,C,C/R,C,C owns X-factor
+Diversity control,I,C,C/R,C,C owns diversity adjustment
+Business Utility@K,I,C,C/R,C,C owns business metrics
+Reranking ablation,I,C,C/R,C,C owns ablation table
+Final results table,I,C,C,D/R,D integrates B and C metrics
+LightGCN,I,C,I,D/R,D owns as bonus advanced model
+Streamlit demo,C,C,C,D/R,D owns demo
+Recommendation explanations,C,C,C,D/R,D owns demo explanations using signals from A B C
+System architecture figure,I,C,C,D/R,D owns architecture visual
+PPT integration,I,C,C,D/R,D owns final slide deck consistency
+Report integration,C,C,C,D/R,D owns final report assembly with input from all
+Rehearsal,A/R,B/R,C/R,D/R,All,Each member presents their own section

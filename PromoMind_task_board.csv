@@ -1,0 +1,56 @@
+task_id,owner,workstream,priority,depends_on,due_day,deliverable,acceptance_criteria,status
+A1,A,Data,P0,None,Day 0,"Create project folder structure","data/raw data/processed notebooks src outputs app slides_assets exist",Not started
+A2,A,Data,P0,A1,Day 0,"Confirm data access","transactions products promotions campaigns coupons coupon_redemptions demographics can be loaded",Not started
+A3,A,Data,P0,A2,Day 1,"Schema notes","Each core table has primary keys join keys and purpose documented",Not started
+A4,A,Data,P0,A2,Day 1,"Sample cleaned transactions","Small sample is clean enough for full pipeline smoke test",Not started
+A5,A,Data,P0,A4,Day 1,"Sample train valid test split","B C D can use sample files to run pipeline",Not started
+A6,A,Data,P0,A2,Day 2,"Full cleaned transactions","Invalid or low quality rows handled and cleaning counts documented",Not started
+A7,A,Data,P0,A6,Day 2,"Full time-based split","Week 1-40 train Week 41-46 valid Week 47-53 test with no leakage",Not started
+A8,A,Data,P0,A7,Day 2,"product_features.csv","product_id department product_category brand product_description available",Not started
+A9,A,Data,P0,A7,Day 2,"household_features.csv","household activity spend top categories and demographics availability available",Not started
+A10,A,Data,P1,A6,Day 3,"EDA notebook","EDA notebook runs and outputs core statistics",Not started
+A11,A,Data,P1,A10,Day 3,"EDA figures","Weekly trend product frequency household activity top departments coupon sparsity figures saved",Not started
+A12,A,Data,P1,A7,Day 3,"Leakage audit","Train valid test time boundaries checked and documented",Not started
+A13,A,Data,P1,A11,Day 5,"Dataset PPT pages","Dataset overview problem definition and split slides ready",Not started
+A14,A,Data,P1,A10,Day 6,"Dataset report section","Dataset preprocessing and split report text ready",Not started
+B1,B,Models,P0,A5,Day 1,"Sparse matrix loader sample","household and product mappings work on sample split",Not started
+B2,B,Models,P0,B1,Day 2,"Popularity baseline","candidates_popularity.csv generated and evaluable",Not started
+B3,B,Models,P0,A8,Day 2,"Category popularity baseline","candidates_category_popularity.csv generated with fallback logic",Not started
+B4,B,Models,P1,A7,Day 3,"ItemKNN","candidates_itemknn.csv generated for Top 50 or Top 100",Not started
+B5,B,Models,P0,A7,Day 3,"ALS first run","candidates_als.csv generated using full train split",Not started
+B6,B,Models,P0,B5,Day 4,"ALS tuning","als_tuning_results.csv contains tested factors regularization iterations alpha",Not started
+B7,B,Models,P1,B5,Day 4,"BPR first run","candidates_bpr.csv generated if time allows",Not started
+B8,B,Models,P1,B7,Day 5,"BPR tuning","bpr_tuning_results.csv ready if BPR completed",Not started
+B9,B,Models,P0,B2 B3 B5,Day 5,"Model comparison table","Popularity Category Popularity ItemKNN ALS BPR compared where available",Not started
+B10,B,Models,P1,B9,Day 5,"Model PPT pages","Candidate generation baselines ALS/BPR slides ready",Not started
+B11,B,Models,P1,B9,Day 6,"Model report section","Baseline and matrix factorization report text ready",Not started
+C1,C,Reranking,P0,A5,Day 1,"Reranker smoke test","Simple reranking runs on sample candidates",Not started
+C2,C,Reranking,P0,A2,Day 2,"Promotion join analysis","Product-week promotion construction documented",Not started
+C3,C,Reranking,P0,C2,Day 2,"product_week_promotion_features.csv","product_id week promotion_score available",Not started
+C4,C,Reranking,P0,A2,Day 2,"Coupon join analysis","Campaign coupon redemption relationship documented",Not started
+C5,C,Reranking,P0,C4,Day 3,"household_product_coupon_features.csv","household product coupon score or campaign exposure signal available",Not started
+C6,C,Reranking,P0,A7,Day 3,"Discount cost features","retail_disc coupon_disc coupon_match_disc transformed into proxy variables",Not started
+C7,C,Reranking,P0,B5 C3 C5 C6,Day 3,"ALS reranking first version","reranked_als.csv generated with final_score and final_rank",Not started
+C8,C,Reranking,P0,C7,Day 4,"Business Utility@K","business_metrics.py and business_utility_results.csv ready",Not started
+C9,C,Reranking,P1,C7,Day 4,"Diversity control","Diversity rule implemented and diversity_ablation.csv generated",Not started
+C10,C,Reranking,P0,C8 C9,Day 5,"Reranking ablation table","ALS only promotion coupon discount diversity variants compared",Not started
+C11,C,Reranking,P1,C8,Day 5,"Lambda sensitivity","lambda_sensitivity.csv or budget trade-off figure ready",Not started
+C12,C,Reranking,P1,C10,Day 5,"Reranking PPT pages","Reranking formula business utility and ablation slides ready",Not started
+C13,C,Reranking,P1,C10,Day 6,"Reranking report section","Promotion coupon discount proxy and ablation report text ready",Not started
+D1,D,Integration,P0,None,Day 0,"PPT outline","12-14 page outline created with owner per page",Not started
+D2,D,Demo,P0,None,Day 1,"Streamlit empty shell","App opens and has household selector placeholder",Not started
+D3,D,Integration,P0,A5 B2 C1,Day 1,"End-to-end sample smoke test","Sample data model rerank demo pipeline runs",Not started
+D4,D,Demo,P0,A9 B5,Day 3,"Demo with ALS candidates","Demo reads household profile and ALS Top 10",Not started
+D5,D,Integration,P0,B9 C8,Day 4,"Final results table template","final_results_table.csv columns finalized",Not started
+D6,D,DeepModel,P2,A7,Day 4,"LightGCN data format","RecBole or LightGCN id mapping files prepared",Not started
+D7,D,DeepModel,P2,D6,Day 5,"LightGCN run","LightGCN result generated if time allows",Not started
+D8,D,Demo,P0,C7,Day 5,"Demo with reranking","Demo reads reranked recommendations coupon flag and reasons",Not started
+D9,D,Demo,P1,C8,Day 5,"Budget slider","Slider changes coupon assignment or cost threshold",Not started
+D10,D,Integration,P0,D5 B9 C10,Day 5,"Final results table","final_results_table.csv and PPT-ready table image saved",Not started
+D11,D,Integration,P0,D10,Day 5,"System architecture figure","Two-stage system architecture image ready",Not started
+D12,D,Integration,P0,A13 B10 C12 D11,Day 6,"PPT first full draft","All main slides integrated into one deck",Not started
+D13,D,Integration,P0,A14 B11 C13 D12,Day 6,"Report first full draft","All report sections integrated",Not started
+D14,D,Demo,P0,D8,Day 6,"Demo screenshot or backup recording","Demo screenshot saved for backup if live demo fails",Not started
+D15,D,Integration,P0,D12 D13 D14,Day 7,"Final submission package","PPT report code outputs and demo ready",Not started
+ALL1,All,PM,P0,None,Daily,"Daily standup","Each member reports done today blocker",Not started
+ALL2,All,PM,P0,D12,Day 7,"Rehearsal","Each person can present own section within time",Not started
