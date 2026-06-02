@@ -21,7 +21,7 @@ Two-presenter split:
 | 7. Reranking | Presenter 2 | 1:05 | X-factor: reranking balances base relevance, promotion, coupon, discount-cost proxy, and diversity. | 亮点是 promotion-aware reranking，不只是推荐商品，还决定哪些商品值得推优惠。 |
 | 8. Experiments | Presenter 2 | 1:00 | Evaluate Recall@K, NDCG@K, coverage, diversity, novelty, Business Utility@K, and ablations. | 实验要比较准确率、覆盖率、多样性、新颖性、商业效用代理指标和重排序消融。 |
 | 9. Demo | Presenter 2 | 0:55 | Streamlit demo visualizes household recommendations, coupon flags, explanations, and budget slider. | Demo 展示 household、Top-10 推荐、coupon 决策、推荐理由和预算滑杆。 |
-| 10. Plan/Risks | Presenter 2 | 0:55 | Main line is feasible even if LightGCN slips; limitations are stated honestly. | 即使 LightGCN 来不及，ALS/BPR + 重排序 + 指标 + demo 仍然完整；风险要诚实说明。 |
+| 10. Feasibility/Risks | Presenter 2 | 0:55 | The project has a stable core path, clear extensions, and controlled limitations for the final solution presentation. | 项目有稳定主线、清晰扩展方向，并且对最终方案汇报中的限制和风险有明确控制。 |
 
 ## Transition
 
