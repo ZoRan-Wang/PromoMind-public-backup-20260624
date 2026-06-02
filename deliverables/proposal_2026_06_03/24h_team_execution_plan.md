@@ -1,185 +1,108 @@
-# 24-Hour Team Execution Plan
+# 24-Hour Proposal Execution Plan
 
-Context: The proposal presentation is due on June 3, 2026. The team has one day to prepare a high-precision proposal deck and speaking plan. This plan prioritizes proposal quality without pretending final experiments are already done.
+Context: the June 3 presentation is a proposal, not a final project defense. Based on the latest team feedback, the presentation should be direct: explain which dataset we choose, what the dataset looks like and what features it has, what recommendation problem we will solve, and what methods/experiments we plan to use.
 
 ## PM Decision
 
-The team should split by slide/story ownership, not only by future code ownership. Each member owns a technical workstream and the proposal materials for that workstream.
+Use two presenters for the oral proposal. Keep the slide deck research-oriented, but do not over-explain every future implementation detail.
 
-| Member | Role | Proposal responsibility | Future project responsibility | Proposal speaking time |
-| --- | --- | --- | --- | --- |
-| A | Data and Problem Lead | Dataset, collection method, expected size, task definition, split | Raw data, cleaning, EDA, feature tables, leakage checks | 2:45 |
-| B | Model Lead | Candidate generation algorithms and library acknowledgements | Popularity, Category Popularity, ItemKNN, ALS, BPR | 1:00 |
-| C | Promotion and Evaluation Lead | Reranking formula, coupon/promotion signals, Business Utility@K, experiments | Promotion/coupon features, discount proxy, ablations, metrics | 2:05 |
-| D | Integration and Presentation Lead | Architecture, demo concept, GitHub pack, final deck integration, timing | Streamlit demo, optional LightGCN, result integration, final report/deck | 3:00 |
+| Presenter | Slides | Main responsibility | Time target |
+| --- | --- | --- | --- |
+| Presenter 1 | Slides 1-5 | Project motivation, dataset choice, dataset features, recommendation task, chronological split, system overview | 3:50 |
+| Presenter 2 | Slides 6-10 | Algorithms, promotion-aware reranking, research questions, experiments, demo concept, risks and next steps | 4:55 |
 
-Scripted talk time target: 8:50. Rehearsal target: 9:30 or less, leaving at least 30 seconds before the 10-minute cap.
+Scripted talk time target: about 8:50. Rehearsal target: 9:30 or less, leaving at least 30 seconds before the 10-minute cap.
 
-## Timebox From Now To Class
+## What The Teacher Needs To Hear
 
-### T-minus 24 to 18 hours
+Minimum proposal content:
 
-Goal: lock story and assignment.
+1. We choose The Complete Journey dataset.
+2. It contains household-level grocery transactions plus product, promotion, coupon, campaign, redemption, and demographic tables.
+3. The core features include household id, product id, basket id, week, quantity, sales value, retail/coupon discounts, department, category, brand, promotion exposure, coupon/campaign mapping, and optional demographics.
+4. The recommendation problem is next-period household-product Top-K recommendation under implicit feedback.
+5. Planned methods are Popularity, Category Popularity, ItemKNN, Implicit ALS, BPR if time allows, and LightGCN as a bonus.
+6. Planned experiments use chronological split, Recall@K/NDCG@K, coverage/diversity/novelty, Business Utility@K proxy, and reranking ablations.
+7. X-factor is promotion-aware reranking and a budget-aware coupon decision demo.
 
-- A confirms dataset facts and avoids restricted-school-file upload.
-- B confirms algorithm list and external libraries to acknowledge.
-- C confirms reranking formula and business metric wording.
-- D checks deck structure, GitHub folder, and slide visual consistency.
+## Presenter 1: Dataset, Problem, And Setup
 
-Exit criteria:
+### Slides
 
-- Everyone has read `proposal_deck_script.md`.
-- No one is rewriting the project idea in a different direction.
-- The deck covers every announcement requirement.
+- Slide 1: Title and one-sentence project idea.
+- Slide 2: Research problem and motivation.
+- Slide 3: Dataset and collection method.
+- Slide 4: Recommendation task and time split.
+- Slide 5: System architecture.
 
-### T-minus 18 to 12 hours
+### Must Say
 
-Goal: polish each member's owned section.
+- "We use The Complete Journey, a public grocery retail dataset from the `completejourney` project."
+- "The raw RDS/RDA artifacts are already in our GitHub repository, and `scripts/download_completejourney.R` documents the extraction path."
+- "The dataset has about 2,469 households, 1.47 million transaction rows, 92k products, plus promotion, coupon, campaign, redemption, and demographic tables."
+- "The dataset features are useful because we can model purchases, item metadata, discounts, promotion exposure, coupon eligibility, and household profile signals."
+- "We use a chronological split because a real recommender predicts future baskets from past behavior."
 
-- A prepares one clean dataset table and one 20-second explanation of why the time split is valid.
-- B prepares one algorithm comparison table and one sentence on why implicit feedback fits grocery data.
-- C prepares reranking formula explanation and proxy-profit limitation wording.
-- D prepares the system architecture explanation and demo storyboard.
+### Do Not Say
 
-Exit criteria:
+- Do not claim we have final experiment results.
+- Do not say coupon redemption is the main label.
+- Do not say demographics are available for all households.
 
-- Each speaker can explain their slides without reading paragraphs.
-- Each section has one clear claim and one concrete proof object.
+## Presenter 2: Methods, Research Design, And Demo
 
-### T-minus 12 to 6 hours
+### Slides
 
-Goal: rehearse and cut.
+- Slide 6: Candidate generation models.
+- Slide 7: Promotion-aware reranking.
+- Slide 8: Research questions and experiments.
+- Slide 9: Research contribution and demo.
+- Slide 10: Plan, presentation split, and risks.
 
-- Run the full deck once with a timer.
-- Remove repeated explanation of the same dataset/method.
-- Replace vague claims with precise proposal-stage statements.
-- Verify the final deck still stays under 10 minutes.
+### Must Say
 
-Exit criteria:
+- "We start with popularity baselines because grocery recommendation has strong repeat-purchase and mass-popularity effects."
+- "ALS/BPR are suitable because the data is implicit feedback, not ratings."
+- "The promotion-aware reranker combines base relevance, promotion score, coupon score, discount-cost proxy, and diversity."
+- "Business Utility@K is not profit. It is a revenue-minus-discount proxy because cost and margin are unavailable."
+- "The demo visualizes trade-offs: a household selector, Top-10 recommendations, coupon flags, reasons, and a marketing budget slider."
 
-- Team can finish in 9:30 or less.
-- Everyone knows transition lines.
-- Known limitations are framed honestly.
+### Do Not Say
 
-### T-minus 6 hours to submission
+- Do not claim causal coupon uplift.
+- Do not claim LightGCN is required for the project to be complete.
+- Do not imply the budget slider is final proof of performance; offline metrics are the evidence.
 
-Goal: final package.
+## Two-Presenter Transition
 
-- D uploads the PPTX to eLearn before class time.
-- D pushes final GitHub updates if any names/timing changed.
-- A/B/C verify their own slide content one last time.
-- Everyone keeps a local copy of the deck and GitHub link.
+Transition from Presenter 1 to Presenter 2 after Slide 5:
 
-Exit criteria:
+English:
 
-- eLearn has the proposal slides.
-- GitHub has the proposal pack.
-- Team has a 5-second message ready for classmates/meeting.
+> "Now that the dataset, prediction task, and pipeline are defined, I will hand over to Presenter 2 to explain the recommendation models, promotion-aware reranking, and evaluation plan."
 
-## Detailed Member Tasks
+Chinese:
 
-### A: Data and Problem Lead
+> "数据集、任务定义和系统流程讲清楚之后，下面交给第二位同学介绍推荐模型、促销感知重排序和实验设计。"
 
-Must deliver for proposal:
+## Q&A Ownership
 
-- Slide 3 dataset story.
-- Slide 4 recommendation task definition.
-- Dataset facts checked against repo docs:
-  - households
-  - transaction rows
-  - products
-  - coupon/campaign/promotion/demographic tables
-- One sentence on collection method:
-  - public `completejourney` package and raw RDS/RDA files, no private scraping.
-- One sentence on risks:
-  - coupon redemption sparse; demographics partial; both are handled as auxiliary signals.
+| Likely question | Main responder |
+| --- | --- |
+| Why this dataset? | Presenter 1 |
+| What features does the dataset have? | Presenter 1 |
+| Why chronological split? | Presenter 1 |
+| Why ALS/BPR? | Presenter 2 |
+| What is promotion-aware reranking? | Presenter 2 |
+| Is Business Utility profit? | Presenter 2 |
+| Is this causal coupon uplift? | Presenter 2 |
+| What if LightGCN is not finished? | Presenter 2 |
 
-Acceptance criteria:
+## Final 24-Hour Checklist
 
-- Can answer: "What data are you collecting and how large is it?"
-- Can answer: "Why is the split chronological instead of random?"
-- Does not use future-week data in the proposed training story.
-
-### B: Model Lead
-
-Must deliver for proposal:
-
-- Slide 6 candidate generation story.
-- Algorithm ladder:
-  - Popularity
-  - Category Popularity
-  - ItemKNN
-  - Implicit ALS
-  - BPR if time allows
-  - LightGCN as bonus
-- Library acknowledgement:
-  - `implicit` for ALS/BPR-style implicit recommenders.
-  - RecBole for LightGCN if used.
-  - Cornac optional/course-aligned framework if used.
-- One sentence on why grocery has strong popularity baselines.
-
-Acceptance criteria:
-
-- Can answer: "Why ALS/BPR instead of ratings?"
-- Can answer: "What happens if LightGCN is not finished?"
-- Does not overpromise deep learning as required for the main project line.
-
-### C: Promotion and Evaluation Lead
-
-Must deliver for proposal:
-
-- Slide 7 reranking formula.
-- Slide 8 experiment and metric plan.
-- Business Utility wording:
-  - "revenue-minus-discount proxy", not "profit".
-- Reranking ablation plan:
-  - base only
-  - promotion
-  - coupon
-  - promotion + coupon
-  - discount-aware
-  - full reranking with diversity
-- Coupon sparsity explanation:
-  - redemption is too sparse to be the only target, so it is an auxiliary signal.
-
-Acceptance criteria:
-
-- Can answer: "What is the X-factor beyond Top-K recommendation?"
-- Can answer: "How do you evaluate the business effect?"
-- Can answer: "Why is this not a causal coupon uplift model?"
-
-### D: Integration and Presentation Lead
-
-Must deliver for proposal:
-
-- Slide 5 architecture.
-- Slide 9 demo and X-factor storyboard.
-- Slide 10 ownership and plan.
-- GitHub proposal pack:
-  - `deliverables/proposal_2026_06_03/`
-- eLearn upload readiness:
-  - final PPTX under 10 minutes.
-- Optional:
-  - update member names in deck if placeholders A/B/C/D need replacement.
-
-Acceptance criteria:
-
-- Can answer: "What will the working system look like?"
-- Can answer: "Where can the team find the files?"
-- Can run the meeting without re-summarizing the idea from scratch.
-
-## Meeting Rule
-
-Do not spend the online meeting restating the whole project. Start from the GitHub pack and ask only unresolved questions:
-
-- Does anyone object to their assigned section?
-- Does anyone need a name replacement in the deck?
-- Does anyone see a factual error in dataset size or library acknowledgement?
-- Who uploads to eLearn?
-
-## Escalation Rules
-
-- If a fact is uncertain, mark it as "expected" in proposal language rather than asserting it as completed.
-- If a model is risky, move it from required to bonus.
-- If the deck exceeds 10 minutes, cut details from algorithm tuning first, not from dataset/problem/X-factor coverage.
-- If someone cannot finish their speaker section, D reads that section from `proposal_deck_script.md` but the original owner still owns follow-up work.
+- Presenter 1 reads `presenter_1_background_zh_en.md`.
+- Presenter 2 reads `presenter_2_background_zh_en.md`.
+- Both presenters read `proposal_deck_script.md`.
+- One person uploads `PromoMind_project2_proposal_slides.pptx` to eLearn before class.
+- The uploader posts the upload confirmation in the team chat.
+- Rehearse once with a timer and cut extra details if the talk exceeds 9:30.

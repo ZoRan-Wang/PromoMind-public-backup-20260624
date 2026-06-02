@@ -12,7 +12,10 @@ GitHub repository: https://github.com/ZoRan-Wang/PromoMind
 | `proposal_deck_script.md` | Slide-by-slide speaking plan for the max 10-minute proposal |
 | `full_project_proposal.md` | Full written proposal text in proposal-stage language |
 | `research_design_and_evaluation.md` | Research questions, hypotheses, experiment design, validity threats |
-| `24h_team_execution_plan.md` | PM-level four-person work plan for the final 24 hours before proposal |
+| `24h_team_execution_plan.md` | PM-level two-presenter execution plan for the final 24 hours before proposal |
+| `two_presenter_division.md` | Short two-presenter split and transition lines |
+| `presenter_1_background_zh_en.md` | Bilingual background pack for Presenter 1 |
+| `presenter_2_background_zh_en.md` | Bilingual background pack for Presenter 2 |
 | `course_requirements_alignment.md` | Mapping from Dr Hady's announcement to our slide content |
 | `useful_file_index.md` | Where useful repo files and raw data live |
 | `submission_checklist.md` | Final check before uploading slides to eLearn |
@@ -36,7 +39,7 @@ Do not upload the official school PDF/course document to this public GitHub repo
 ## Recommended Team Flow
 
 1. Everyone reads `proposal_deck_script.md`.
-2. Each member claims their assigned section in `24h_team_execution_plan.md`.
-3. D/integration owner updates member names in the PPTX and README if needed.
+2. Presenter 1 reads `presenter_1_background_zh_en.md`; Presenter 2 reads `presenter_2_background_zh_en.md`.
+3. The team confirms who uploads the PPTX to eLearn.
 4. Whole team rehearses once with a target of 9:30, not 9:59.
 5. Upload `PromoMind_project2_proposal_slides.pptx` to eLearn before class.

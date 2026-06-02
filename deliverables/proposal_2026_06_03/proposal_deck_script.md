@@ -2,9 +2,11 @@
 
 Target: max 10 minutes. Recommended rehearsal target: 9:30.
 
+Two-presenter split: Presenter 1 covers Slides 1-5; Presenter 2 covers Slides 6-10.
+
 ## Slide 1: Title
 
-Owner: D  
+Owner: Presenter 1  
 Time: 0:25
 
 Claim: PromoMind is a promotion-aware grocery recommender, not just a product recommender.
@@ -16,7 +18,7 @@ Talk track:
 
 ## Slide 2: Research Problem
 
-Owner: A/C  
+Owner: Presenter 1  
 Time: 0:50
 
 Claim: The research question is whether promotion/coupon context can improve the trade-off among relevance, utility proxy, and diversity.
@@ -29,7 +31,7 @@ Talk track:
 
 ## Slide 3: Dataset And Collection
 
-Owner: A  
+Owner: Presenter 1  
 Time: 1:05
 
 Claim: The Complete Journey gives us the right combination of purchases, products, promotions, coupons, campaigns, and household profiles.
@@ -43,7 +45,7 @@ Talk track:
 
 ## Slide 4: Recommendation Task
 
-Owner: A  
+Owner: Presenter 1  
 Time: 0:50
 
 Claim: We use historical household transactions to predict future products with a time-based split.
@@ -56,7 +58,7 @@ Talk track:
 
 ## Slide 5: System Architecture
 
-Owner: D  
+Owner: Presenter 1  
 Time: 0:45
 
 Claim: The system has two stages: candidate generation and promotion-aware reranking.
@@ -69,7 +71,7 @@ Talk track:
 
 ## Slide 6: Candidate Generation Models
 
-Owner: B  
+Owner: Presenter 2  
 Time: 1:00
 
 Claim: We will compare simple baselines with stronger implicit-feedback recommenders.
@@ -83,7 +85,7 @@ Talk track:
 
 ## Slide 7: Promotion-aware Reranking
 
-Owner: C  
+Owner: Presenter 2  
 Time: 1:05
 
 Claim: The X-factor is a second-stage ranking formula that balances relevance with marketing signals and discount cost.
@@ -98,7 +100,7 @@ Talk track:
 
 ## Slide 8: Research Questions And Experiments
 
-Owner: C/B  
+Owner: Presenter 2  
 Time: 1:00
 
 Claim: We evaluate the project as a recommender systems research question, not only as a demo.
@@ -113,7 +115,7 @@ Talk track:
 
 ## Slide 9: Research Contribution And Demo
 
-Owner: D  
+Owner: Presenter 2  
 Time: 0:55
 
 Claim: The demo visualizes the research trade-offs rather than replacing offline evaluation.
@@ -127,7 +129,7 @@ Talk track:
 
 ## Slide 10: Plan, Ownership, And Risks
 
-Owner: D plus all  
+Owner: Presenter 2  
 Time: 0:55
 
 Claim: The project is feasible because the main line is stable even if bonus models slip.
@@ -168,3 +170,8 @@ Answer: No. Promotion and coupon exposure are observational in this dataset. We 
 Question: How do you avoid leakage from promotions and coupons?
 
 Answer: We use chronological split, compute historical features from train windows, and do not use target-period redemption or purchases as ranking features. Target-period sales value is only used after ranking to score hit products.
+
+Presenter ownership:
+
+- Presenter 1 answers dataset, feature, collection, and chronological split questions.
+- Presenter 2 answers model, reranking, metrics, business proxy, demo, and limitation questions.

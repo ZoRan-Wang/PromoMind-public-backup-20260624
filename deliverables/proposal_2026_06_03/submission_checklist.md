@@ -2,7 +2,7 @@
 
 ## Before Uploading To eLearn
 
-- [ ] Replace A/B/C/D with real member names if the team wants names on slides.
+- [ ] Replace Presenter 1 / Presenter 2 with real member names if the team wants names on slides.
 - [ ] Confirm slide count is 10 or fewer.
 - [ ] Rehearse once and target 9:30 or less.
 - [ ] Confirm Slide 3 dataset size numbers are acceptable.

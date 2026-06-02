@@ -12,6 +12,9 @@ This index tells the team what to read and what to avoid uploading.
 | `deliverables/proposal_2026_06_03/full_project_proposal.md` | Full written proposal |
 | `deliverables/proposal_2026_06_03/research_design_and_evaluation.md` | Research questions, hypotheses, protocol, validity threats |
 | `deliverables/proposal_2026_06_03/24h_team_execution_plan.md` | PM-level urgent work split |
+| `deliverables/proposal_2026_06_03/two_presenter_division.md` | Two-presenter slide split and transition lines |
+| `deliverables/proposal_2026_06_03/presenter_1_background_zh_en.md` | Bilingual background notes for Presenter 1 |
+| `deliverables/proposal_2026_06_03/presenter_2_background_zh_en.md` | Bilingual background notes for Presenter 2 |
 
 ## Core Repo Documents
 
