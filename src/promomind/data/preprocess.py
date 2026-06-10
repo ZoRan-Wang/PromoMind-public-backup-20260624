@@ -40,9 +40,18 @@ def require_columns(df: pd.DataFrame, required: Iterable[str], name: str = "data
 def clean_transactions(transactions: pd.DataFrame) -> pd.DataFrame:
     """Normalize transaction data and remove rows that cannot support modeling."""
     df = normalize_columns(transactions)
-    require_columns(df, schema.REQUIRED_TRANSACTION_COLUMNS, "transactions")
+    require_columns(
+        df,
+        [*schema.REQUIRED_TRANSACTION_COLUMNS, schema.WEEK],
+        "transactions",
+    )
 
-    for col in [schema.HOUSEHOLD_ID, schema.PRODUCT_ID, schema.BASKET_ID]:
+    key_columns = [
+        schema.HOUSEHOLD_ID,
+        schema.PRODUCT_ID,
+        schema.BASKET_ID,
+    ]
+    for col in key_columns:
         df[col] = df[col].astype("string").str.strip()
         df = df[df[col].notna() & (df[col] != "")]
 
@@ -63,6 +72,7 @@ def clean_transactions(transactions: pd.DataFrame) -> pd.DataFrame:
 
     df = df[df[schema.QUANTITY].fillna(0) > 0]
     df = df[df[schema.SALES_VALUE].fillna(-1) >= 0]
+    df = df[df[schema.WEEK].between(1, schema.DEFAULT_TEST_END_WEEK, inclusive="both")]
 
     if schema.TRANSACTION_TIMESTAMP in df.columns:
         df[schema.TRANSACTION_TIMESTAMP] = pd.to_datetime(
@@ -85,8 +95,71 @@ def clean_transactions(transactions: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("transactions needs one time column: transaction_timestamp, day, or week.")
 
     df = df[df[schema.TRANSACTION_TIMESTAMP].notna()]
+    df = df.drop_duplicates()
+
+    basket_product_keys = [
+        schema.HOUSEHOLD_ID,
+        schema.STORE_ID,
+        schema.BASKET_ID,
+        schema.PRODUCT_ID,
+        schema.WEEK,
+        schema.TRANSACTION_TIMESTAMP,
+    ]
+    basket_product_keys = [col for col in basket_product_keys if col in df.columns]
+    value_columns = [
+        schema.QUANTITY,
+        schema.SALES_VALUE,
+        schema.RETAIL_DISC,
+        schema.COUPON_DISC,
+        schema.COUPON_MATCH_DISC,
+    ]
+    value_columns = [col for col in value_columns if col in df.columns]
+    other_columns = [
+        col for col in df.columns if col not in basket_product_keys and col not in value_columns
+    ]
+    aggregations = {col: "sum" for col in value_columns}
+    aggregations.update({col: "first" for col in other_columns})
+    df = df.groupby(basket_product_keys, as_index=False, dropna=False).agg(aggregations)
+
     sort_cols = [schema.TRANSACTION_TIMESTAMP, schema.BASKET_ID, schema.PRODUCT_ID]
     return df.sort_values(sort_cols).reset_index(drop=True)
+
+
+def select_products_from_train(
+    train_transactions: pd.DataFrame,
+    min_product_purchases: int | None = None,
+    top_products: int | None = None,
+) -> pd.Index:
+    """Select catalog products using training interactions only."""
+    train = normalize_columns(train_transactions)
+    require_columns(train, [schema.PRODUCT_ID], "train_transactions")
+
+    if min_product_purchases is not None and min_product_purchases < 1:
+        raise ValueError("min_product_purchases must be at least 1.")
+    if top_products is not None and top_products < 1:
+        raise ValueError("top_products must be at least 1.")
+
+    counts = train.groupby(schema.PRODUCT_ID).size().sort_values(
+        ascending=False,
+        kind="stable",
+    )
+    keep = counts
+    if min_product_purchases is not None:
+        keep = keep[keep >= min_product_purchases]
+    if top_products is not None:
+        keep = keep.head(top_products)
+    return keep.index
+
+
+def apply_product_catalog(
+    transactions: pd.DataFrame,
+    product_ids: Iterable[str],
+) -> pd.DataFrame:
+    """Apply a preselected product catalog without learning from this split."""
+    df = normalize_columns(transactions)
+    require_columns(df, [schema.PRODUCT_ID], "transactions")
+    keep = pd.Index(product_ids, dtype="string")
+    return df[df[schema.PRODUCT_ID].astype("string").isin(keep)].reset_index(drop=True)
 
 
 def filter_frequent_products(
@@ -194,7 +267,13 @@ def build_product_features(
         product_meta[schema.PRODUCT_ID] = product_meta[schema.PRODUCT_ID].astype("string")
         features = features.merge(product_meta.drop_duplicates(schema.PRODUCT_ID), on=schema.PRODUCT_ID, how="left")
 
-    return features.fillna(0)
+    numeric_feature_columns = [
+        col
+        for col in features.columns
+        if col != schema.PRODUCT_ID and pd.api.types.is_numeric_dtype(features[col])
+    ]
+    features[numeric_feature_columns] = features[numeric_feature_columns].fillna(0)
+    return features
 
 
 def build_household_features(
@@ -221,7 +300,68 @@ def build_household_features(
         demo[schema.HOUSEHOLD_ID] = demo[schema.HOUSEHOLD_ID].astype("string")
         features = features.merge(demo.drop_duplicates(schema.HOUSEHOLD_ID), on=schema.HOUSEHOLD_ID, how="left")
 
-    return features.fillna(0)
+    numeric_feature_columns = [
+        col
+        for col in features.columns
+        if col != schema.HOUSEHOLD_ID and pd.api.types.is_numeric_dtype(features[col])
+    ]
+    features[numeric_feature_columns] = features[numeric_feature_columns].fillna(0)
+    return features
+
+
+def build_household_category_preferences(
+    transactions: pd.DataFrame,
+    products: pd.DataFrame,
+) -> pd.DataFrame:
+    """Build train-window top department and category for each household."""
+    tx = clean_transactions(transactions)
+    product_meta = normalize_columns(products)
+    require_columns(
+        product_meta,
+        [schema.PRODUCT_ID, "department", "product_category"],
+        "products",
+    )
+    product_meta = product_meta[
+        [schema.PRODUCT_ID, "department", "product_category"]
+    ].drop_duplicates(schema.PRODUCT_ID)
+    product_meta[schema.PRODUCT_ID] = product_meta[schema.PRODUCT_ID].astype("string")
+    for col in ["department", "product_category"]:
+        product_meta[col] = product_meta[col].astype("string").fillna("Unknown")
+
+    joined = tx[[schema.HOUSEHOLD_ID, schema.PRODUCT_ID]].merge(
+        product_meta,
+        on=schema.PRODUCT_ID,
+        how="left",
+    )
+    joined[["department", "product_category"]] = joined[
+        ["department", "product_category"]
+    ].fillna("Unknown")
+
+    output = joined[[schema.HOUSEHOLD_ID]].drop_duplicates().reset_index(drop=True)
+    for source_col, output_col in [
+        ("department", "top_department_train"),
+        ("product_category", "top_category_train"),
+    ]:
+        counts = (
+            joined.groupby([schema.HOUSEHOLD_ID, source_col], dropna=False)
+            .size()
+            .rename("purchase_rows")
+            .reset_index()
+            .sort_values(
+                [schema.HOUSEHOLD_ID, "purchase_rows", source_col],
+                ascending=[True, False, True],
+                kind="stable",
+            )
+        )
+        top = counts.drop_duplicates(schema.HOUSEHOLD_ID).rename(
+            columns={source_col: output_col}
+        )
+        output = output.merge(
+            top[[schema.HOUSEHOLD_ID, output_col]],
+            on=schema.HOUSEHOLD_ID,
+            how="left",
+        )
+    return output
 
 
 def join_promotion_placeholders(

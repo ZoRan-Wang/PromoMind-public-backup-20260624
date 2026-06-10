@@ -46,15 +46,20 @@ Column names from the R `completejourney` package and common Dunnhumby exports a
 
 ## Processed Outputs
 
-Running `python scripts/prepare_dataset.py` writes generated files under `data/processed/`, including:
+Running `python scripts/clean_completejourney.py` reads the committed RDS/RDA
+files directly and writes generated files under `data/processed/`, including:
 
 - `transactions_clean.csv`
 - `train_interactions.csv`
 - `valid_interactions.csv`
 - `test_interactions.csv`
+- `products_clean.csv`
+- `demographics_clean.csv`
+- `coupons_clean.csv`
+- `coupon_redemptions_clean.csv`
 - `product_features.csv`
 - `household_features.csv`
-- `transactions_with_promotions.csv`
+- `cleaning_audit.json`
 
 These processed files are intentionally ignored by Git. They should be regenerated locally from the committed raw data or local CSV exports.
 
