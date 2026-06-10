@@ -59,9 +59,25 @@ files directly and writes generated files under `data/processed/`, including:
 - `coupon_redemptions_clean.csv`
 - `product_features.csv`
 - `household_features.csv`
+- `product_week_promotion_features.csv`
+- `household_product_coupon_features.csv`
+- `discount_cost_features.csv`
 - `cleaning_audit.json`
 
 These processed files are intentionally ignored by Git. They should be regenerated locally from the committed raw data or local CSV exports.
+
+Feature definitions:
+
+- Promotion features aggregate display and mailer exposure across stores for
+  each product-week. `promotion_score` is the average display and mailer store
+  exposure rate.
+- Coupon features are sparse positive signals for household-product pairs seen
+  during training and active campaign weeks 41-53. Missing rows imply zero
+  coupon signal. Historical redemption rates use assigned campaigns and
+  redemptions from weeks 1-40 only.
+- Discount-cost features use transaction discounts from weeks 1-40 only.
+  Products without category metadata use the train-wide average as the
+  category fallback.
 
 To create a tiny local smoke-test dataset:
 

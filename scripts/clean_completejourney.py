@@ -21,10 +21,14 @@ if str(SRC_ROOT) not in sys.path:
 
 from promomind.data import schema  # noqa: E402
 from promomind.data.preprocess import (  # noqa: E402
+    add_dataset_weeks,
     apply_product_catalog,
+    build_discount_cost_features,
     build_household_category_preferences,
     build_household_features,
+    build_household_product_coupon_features,
     build_product_features,
+    build_product_week_promotion_features,
     clean_transactions,
     normalize_columns,
     select_products_from_train,
@@ -95,6 +99,104 @@ def missing_counts(frame: pd.DataFrame) -> dict[str, int]:
     return {str(key): int(value) for key, value in counts[counts > 0].items()}
 
 
+def validate_processed_contracts(outputs: dict[str, pd.DataFrame]) -> None:
+    required_columns = {
+        "train_interactions.csv": [
+            schema.HOUSEHOLD_ID,
+            schema.PRODUCT_ID,
+            schema.BASKET_ID,
+            schema.WEEK,
+            schema.QUANTITY,
+            schema.SALES_VALUE,
+            schema.RETAIL_DISC,
+            schema.COUPON_DISC,
+            schema.COUPON_MATCH_DISC,
+        ],
+        "valid_interactions.csv": [
+            schema.HOUSEHOLD_ID,
+            schema.PRODUCT_ID,
+            schema.BASKET_ID,
+            schema.WEEK,
+            schema.QUANTITY,
+            schema.SALES_VALUE,
+            schema.RETAIL_DISC,
+            schema.COUPON_DISC,
+            schema.COUPON_MATCH_DISC,
+        ],
+        "test_interactions.csv": [
+            schema.HOUSEHOLD_ID,
+            schema.PRODUCT_ID,
+            schema.BASKET_ID,
+            schema.WEEK,
+            schema.QUANTITY,
+            schema.SALES_VALUE,
+            schema.RETAIL_DISC,
+            schema.COUPON_DISC,
+            schema.COUPON_MATCH_DISC,
+        ],
+        "product_features.csv": [
+            schema.PRODUCT_ID,
+            "department",
+            "product_category",
+            "brand",
+        ],
+        "household_features.csv": [
+            schema.HOUSEHOLD_ID,
+            "total_baskets_train",
+            "total_spend_train",
+            "avg_basket_value_train",
+            "top_department_train",
+            "top_category_train",
+            "demographics_available",
+        ],
+        "product_week_promotion_features.csv": [
+            schema.PRODUCT_ID,
+            schema.WEEK,
+            "promotion_score",
+            "has_display",
+            "has_mailer",
+            "promotion_source_count",
+        ],
+        "household_product_coupon_features.csv": [
+            schema.HOUSEHOLD_ID,
+            schema.PRODUCT_ID,
+            schema.WEEK,
+            "coupon_score",
+            "campaign_id",
+            "historical_coupon_redemption_rate",
+        ],
+        "discount_cost_features.csv": [
+            schema.PRODUCT_ID,
+            "avg_product_discount_train",
+            "avg_category_discount_train",
+            "estimated_discount_cost",
+        ],
+    }
+    for filename, columns in required_columns.items():
+        frame = outputs[filename]
+        missing = [column for column in columns if column not in frame.columns]
+        if missing:
+            raise AssertionError(f"{filename} is missing required columns: {missing}")
+        if frame[columns].isna().any().any():
+            null_columns = frame[columns].columns[frame[columns].isna().any()].tolist()
+            raise AssertionError(
+                f"{filename} has nulls in required columns: {null_columns}"
+            )
+
+    if outputs["product_week_promotion_features.csv"].duplicated(
+        [schema.PRODUCT_ID, schema.WEEK]
+    ).any():
+        raise AssertionError("Promotion features contain duplicate product-week rows.")
+    if outputs["household_product_coupon_features.csv"].duplicated(
+        [schema.HOUSEHOLD_ID, schema.PRODUCT_ID, schema.WEEK]
+    ).any():
+        raise AssertionError(
+            "Coupon features contain duplicate household-product-week rows."
+        )
+    if outputs["discount_cost_features.csv"][schema.PRODUCT_ID].duplicated().any():
+        raise AssertionError("Discount features contain duplicate product rows.")
+
+
 def main() -> int:
     args = parse_args()
     args.processed_dir.mkdir(parents=True, exist_ok=True)
@@ -108,6 +210,7 @@ def main() -> int:
     raw_campaign_descriptions = read_r_table(
         args.raw_dir / "campaign_descriptions.rda"
     )
+    raw_promotions = read_r_table(args.raw_dir / "promotions.rds")
 
     transaction_audit = {
         "raw_rows": len(raw_transactions),
@@ -175,6 +278,26 @@ def main() -> int:
         raw_campaign_descriptions,
         ["campaign_id"],
     )
+    redemptions = add_dataset_weeks(
+        redemptions,
+        "redemption_date",
+        output_column=schema.WEEK,
+    )
+    campaign_descriptions["start_date"] = pd.to_datetime(
+        campaign_descriptions["start_date"],
+        errors="coerce",
+    )
+    campaign_descriptions["end_date"] = pd.to_datetime(
+        campaign_descriptions["end_date"],
+        errors="coerce",
+    )
+    origin = pd.Timestamp("2017-01-01")
+    campaign_descriptions["start_week"] = (
+        (campaign_descriptions["start_date"] - origin).dt.days // 7 + 1
+    ).clip(1, schema.DEFAULT_TEST_END_WEEK)
+    campaign_descriptions["end_week"] = (
+        (campaign_descriptions["end_date"] - origin).dt.days // 7 + 1
+    ).clip(1, schema.DEFAULT_TEST_END_WEEK)
 
     product_features = build_product_features(train, products)
     product_behavioral_columns = {
@@ -214,6 +337,19 @@ def main() -> int:
         "avg_basket_value": "avg_basket_value_train",
     }
     household_features = household_features.rename(columns=behavioral_columns)
+    promotion_features = build_product_week_promotion_features(
+        raw_promotions,
+        product_ids=selected_products,
+    )
+    coupon_features = build_household_product_coupon_features(
+        train,
+        coupons,
+        campaigns,
+        campaign_descriptions,
+        redemptions,
+    )
+    discount_cost_features = build_discount_cost_features(train, products)
+
     split_audit = {
         "train": {
             "rows": len(train),
@@ -252,7 +388,11 @@ def main() -> int:
         "campaign_descriptions_clean.csv": campaign_descriptions,
         "product_features.csv": product_features,
         "household_features.csv": household_features,
+        "product_week_promotion_features.csv": promotion_features,
+        "household_product_coupon_features.csv": coupon_features,
+        "discount_cost_features.csv": discount_cost_features,
     }
+    validate_processed_contracts(outputs)
     for filename, frame in outputs.items():
         path = args.processed_dir / filename
         frame.to_csv(path, index=False)
@@ -267,6 +407,9 @@ def main() -> int:
             "demographics_missing_policy": "preserve_as_missing; do not drop households",
             "target_sales_value_policy": "retained for evaluation only; not a ranking feature",
             "coupon_redemption_policy": "cleaned auxiliary table only; no future redemption features built",
+            "promotion_feature_policy": "planned store-level display/mailer exposure aggregated by product-week",
+            "coupon_feature_policy": "sparse positive signals for train-observed household-product affinities; target weeks 41-53",
+            "discount_feature_policy": "estimated only from weeks 1-40",
         },
         "transactions": transaction_audit,
         "splits": split_audit,
@@ -277,11 +420,35 @@ def main() -> int:
             "coupon_redemptions": redemptions_audit,
             "campaigns": campaigns_audit,
             "campaign_descriptions": campaign_descriptions_audit,
+            "product_week_promotion_features": {
+                "rows": len(promotion_features),
+                "min_week": int(promotion_features[schema.WEEK].min()),
+                "max_week": int(promotion_features[schema.WEEK].max()),
+            },
+            "household_product_coupon_features": {
+                "rows": len(coupon_features),
+                "min_week": int(coupon_features[schema.WEEK].min()),
+                "max_week": int(coupon_features[schema.WEEK].max()),
+                "duplicate_household_product_week_rows": int(
+                    coupon_features.duplicated(
+                        [schema.HOUSEHOLD_ID, schema.PRODUCT_ID, schema.WEEK]
+                    ).sum()
+                ),
+            },
+            "discount_cost_features": {
+                "rows": len(discount_cost_features),
+                "duplicate_product_rows": int(
+                    discount_cost_features[schema.PRODUCT_ID].duplicated().sum()
+                ),
+            },
         },
         "missing_values": {
             "products_clean": missing_counts(products),
             "demographics_clean": missing_counts(demographics),
             "household_features": missing_counts(household_features),
+            "product_week_promotion_features": missing_counts(promotion_features),
+            "household_product_coupon_features": missing_counts(coupon_features),
+            "discount_cost_features": missing_counts(discount_cost_features),
         },
         "referential_integrity": {
             "transaction_product_ids_missing_from_products": int(
