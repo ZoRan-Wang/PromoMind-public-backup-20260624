@@ -6,6 +6,7 @@ from promomind.models.baselines import category_popularity_recommendations
 from promomind.models.bpr import BPRRecommender
 from promomind.models.candidates import ITEM_COL, RANK_COL, SCORE_COL, USER_COL
 from promomind.models.itemknn import ItemKNNRecommender
+from promomind.models.next_basket import PersonalTopFrequencyRecommender, TIFUKNNRecommender
 from promomind.models.sparse import build_interaction_matrix
 
 
@@ -144,3 +145,53 @@ def test_bpr_recommends_unseen_items_with_candidate_schema():
 
     _assert_candidate_schema(candidates)
     assert set(candidates[ITEM_COL]).isdisjoint({"P1", "P2"})
+
+
+def test_personal_top_frequency_prioritizes_repeat_purchases():
+    train = _training_interactions()
+
+    model = PersonalTopFrequencyRecommender().fit(
+        train,
+        user_col="household_id",
+        item_col="product_id",
+        weight_col="quantity",
+    )
+    candidates = model.recommend(["H1"], k=2)
+
+    _assert_candidate_schema(candidates)
+    assert list(candidates[ITEM_COL].head(2)) == ["P2", "P1"]
+
+
+def test_personal_top_frequency_can_exclude_seen_items():
+    train = _training_interactions()
+
+    model = PersonalTopFrequencyRecommender().fit(
+        train,
+        user_col="household_id",
+        item_col="product_id",
+        weight_col="quantity",
+    )
+    candidates = model.recommend(["H1"], k=2, exclude_seen=True)
+
+    _assert_candidate_schema(candidates)
+    assert set(candidates[ITEM_COL]).isdisjoint({"P1", "P2"})
+
+
+def test_tifu_knn_recommends_with_candidate_schema():
+    train = _training_interactions().assign(
+        basket_id=["B1", "B2", "B3", "B4", "B5", "B6", "B7"],
+        week=[1, 2, 1, 2, 1, 2, 3],
+    )
+
+    model = TIFUKNNRecommender(n_neighbors=2, alpha=0.7, basket_decay=0.95).fit(
+        train,
+        user_col="household_id",
+        item_col="product_id",
+        weight_col="quantity",
+        basket_col="basket_id",
+        time_col="week",
+    )
+    candidates = model.recommend(["H1"], k=3)
+
+    _assert_candidate_schema(candidates)
+    assert len(candidates) > 0

@@ -33,8 +33,18 @@ from promomind.models.baselines import (  # noqa: E402
     popularity_recommendations,
 )
 from promomind.models.bpr import BPRRecommender  # noqa: E402
-from promomind.models.candidates import ITEM_COL, RANK_COL, SCORE_COL, USER_COL  # noqa: E402
+from promomind.models.candidates import (  # noqa: E402
+    ITEM_COL,
+    RANK_COL,
+    SCORE_COL,
+    USER_COL,
+    sort_candidates,
+)
 from promomind.models.itemknn import ItemKNNRecommender  # noqa: E402
+from promomind.models.next_basket import (  # noqa: E402
+    PersonalTopFrequencyRecommender,
+    TIFUKNNRecommender,
+)
 
 
 CATEGORY_CANDIDATES = [
@@ -55,8 +65,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--product-features-file", default="product_features.csv")
     parser.add_argument(
         "--models",
-        default="popularity,category,itemknn,als",
-        help="Comma-separated list from popularity,category,itemknn,als,bpr,all.",
+        default="popularity,personal_topfreq,category,itemknn,tifu_knn,als",
+        help=(
+            "Comma-separated list from popularity,personal_topfreq,category,itemknn,"
+            "tifu_knn,hybrid_strong,als,bpr,all."
+        ),
     )
     parser.add_argument("--k", type=int, default=50, help="Number of candidates per household.")
     parser.add_argument("--eval-k", type=int, nargs="+", default=[10, 20])
@@ -71,6 +84,11 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--itemknn-neighbors", type=int, default=100)
+    parser.add_argument(
+        "--tifu-grid",
+        default="50:0.7:0.95,100:0.7:0.95,200:0.7:0.95",
+        help="TIFU-KNN grid as neighbors:alpha:basket_decay entries.",
+    )
     parser.add_argument(
         "--als-grid",
         default="16:0.05:3:10,32:0.05:5:20",
@@ -101,8 +119,26 @@ def _existing_weight_col(frame: pd.DataFrame, requested: str | None) -> str | No
 def _parse_model_list(value: str) -> list[str]:
     models = [part.strip().lower() for part in value.split(",") if part.strip()]
     if "all" in models:
-        return ["popularity", "category", "itemknn", "als", "bpr"]
-    valid = {"popularity", "category", "itemknn", "als", "bpr"}
+        return [
+            "popularity",
+            "personal_topfreq",
+            "category",
+            "itemknn",
+            "tifu_knn",
+            "hybrid_strong",
+            "als",
+            "bpr",
+        ]
+    valid = {
+        "popularity",
+        "personal_topfreq",
+        "category",
+        "itemknn",
+        "tifu_knn",
+        "hybrid_strong",
+        "als",
+        "bpr",
+    }
     invalid = sorted(set(models) - valid)
     if invalid:
         raise ValueError(f"Unknown models: {invalid}")
@@ -138,6 +174,22 @@ def _parse_bpr_grid(value: str) -> list[dict[str, float | int]]:
                 "learning_rate": float(learning_rate),
                 "regularization": float(regularization),
                 "epochs": int(epochs),
+            }
+        )
+    return params
+
+
+def _parse_tifu_grid(value: str) -> list[dict[str, float | int]]:
+    params = []
+    for entry in value.split(","):
+        if not entry.strip():
+            continue
+        n_neighbors, alpha, basket_decay = entry.split(":")
+        params.append(
+            {
+                "n_neighbors": int(n_neighbors),
+                "alpha": float(alpha),
+                "basket_decay": float(basket_decay),
             }
         )
     return params
@@ -254,6 +306,29 @@ def _select_best(rows: list[dict[str, object]], primary_k: int) -> int:
     return -max(scores)[2]
 
 
+def _rank_ensemble(
+    candidate_runs: dict[str, pd.DataFrame],
+    weights: dict[str, float],
+    k: int,
+) -> pd.DataFrame:
+    missing = [name for name in weights if name not in candidate_runs]
+    if missing:
+        raise ValueError(f"hybrid_strong requires component candidates that are missing: {missing}")
+
+    frames = []
+    for name, weight in weights.items():
+        frame = candidate_runs[name][[USER_COL, ITEM_COL, RANK_COL]].copy()
+        frame[SCORE_COL] = weight / frame[RANK_COL].astype(float)
+        frames.append(frame[[USER_COL, ITEM_COL, SCORE_COL]])
+
+    combined = (
+        pd.concat(frames, ignore_index=True)
+        .groupby([USER_COL, ITEM_COL], as_index=False)[SCORE_COL]
+        .sum()
+    )
+    return sort_candidates(combined, k=k)
+
+
 def main() -> int:
     args = parse_args()
     if args.k <= 0:
@@ -277,6 +352,7 @@ def main() -> int:
     weight_col = _existing_weight_col(train, args.weight_col)
     models = _parse_model_list(args.models)
     comparison_rows: list[dict[str, object]] = []
+    candidate_runs: dict[str, pd.DataFrame] = {}
 
     if "popularity" in models:
         candidates = popularity_recommendations(
@@ -289,8 +365,29 @@ def main() -> int:
             exclude_seen=args.exclude_seen,
         )
         _write_candidates(candidates, "popularity", args.outputs_dir / "candidates_popularity.csv")
+        candidate_runs["popularity"] = candidates
         comparison_rows.append(
             _evaluate("popularity", candidates, eval_frame, train, metric_features, eval_ks)
+        )
+
+    if "personal_topfreq" in models:
+        model = PersonalTopFrequencyRecommender()
+        model.fit(
+            train,
+            user_col=schema.HOUSEHOLD_ID,
+            item_col=schema.PRODUCT_ID,
+            weight_col=weight_col,
+            time_col=schema.WEEK,
+        )
+        candidates = model.recommend(users, k=args.k, exclude_seen=args.exclude_seen)
+        _write_candidates(
+            candidates,
+            "personal_topfreq",
+            args.outputs_dir / "candidates_personal_topfreq.csv",
+        )
+        candidate_runs["personal_topfreq"] = candidates
+        comparison_rows.append(
+            _evaluate("personal_topfreq", candidates, eval_frame, train, metric_features, eval_ks)
         )
 
     if "category" in models:
@@ -310,6 +407,7 @@ def main() -> int:
             "category_popularity",
             args.outputs_dir / "candidates_category_popularity.csv",
         )
+        candidate_runs["category_popularity"] = candidates
         comparison_rows.append(
             _evaluate("category_popularity", candidates, eval_frame, train, metric_features, eval_ks)
         )
@@ -324,13 +422,53 @@ def main() -> int:
         )
         candidates = model.recommend(users, k=args.k, exclude_seen=args.exclude_seen)
         _write_candidates(candidates, "itemknn", args.outputs_dir / "candidates_itemknn.csv")
+        candidate_runs["itemknn"] = candidates
         comparison_rows.append(
             _evaluate("itemknn", candidates, eval_frame, train, metric_features, eval_ks)
         )
 
+    if "tifu_knn" in models:
+        tuning_rows: list[dict[str, object]] = []
+        candidate_run_list: list[pd.DataFrame] = []
+        for params in _parse_tifu_grid(args.tifu_grid):
+            model = TIFUKNNRecommender(**params)
+            model.fit(
+                train,
+                user_col=schema.HOUSEHOLD_ID,
+                item_col=schema.PRODUCT_ID,
+                weight_col=weight_col,
+                basket_col=schema.BASKET_ID,
+                time_col=schema.WEEK,
+            )
+            candidates = model.recommend(users, k=args.k, exclude_seen=args.exclude_seen)
+            row = _evaluate("tifu_knn", candidates, eval_frame, train, metric_features, eval_ks)
+            row.update(params)
+            tuning_rows.append(row)
+            candidate_run_list.append(candidates)
+
+        best_idx = _select_best(tuning_rows, primary_eval_k)
+        best_candidates = candidate_run_list[best_idx]
+        _write_candidates(best_candidates, "tifu_knn", args.outputs_dir / "candidates_tifu_knn.csv")
+        candidate_runs["tifu_knn"] = best_candidates
+        comparison_rows.append({"model_name": "tifu_knn", **tuning_rows[best_idx]})
+        pd.DataFrame(tuning_rows).to_csv(args.outputs_dir / "tifu_tuning_results.csv", index=False)
+        print(f"Wrote {args.outputs_dir / 'tifu_tuning_results.csv'} ({len(tuning_rows)} rows)")
+
+    if "hybrid_strong" in models:
+        candidates = _rank_ensemble(
+            candidate_runs,
+            weights={"tifu_knn": 0.5, "personal_topfreq": 0.4, "itemknn": 0.1},
+            k=args.k,
+        )
+        _write_candidates(candidates, "hybrid_strong", args.outputs_dir / "candidates_hybrid_strong.csv")
+        candidate_runs["hybrid_strong"] = candidates
+        comparison_rows.append(
+            _evaluate("hybrid_strong", candidates, eval_frame, train, metric_features, eval_ks)
+        )
+
     if "als" in models:
         tuning_rows: list[dict[str, object]] = []
-        candidate_runs: list[pd.DataFrame] = []
+        candidate_run_list: list[pd.DataFrame] = []
         for params in _parse_als_grid(args.als_grid):
             model = ImplicitALSRecommender(**params, backend=args.als_backend)
             model.fit(
@@ -344,18 +482,19 @@ def main() -> int:
             row.update(params)
             row["backend"] = model.backend_
             tuning_rows.append(row)
-            candidate_runs.append(candidates)
+            candidate_run_list.append(candidates)
 
         best_idx = _select_best(tuning_rows, primary_eval_k)
-        best_candidates = candidate_runs[best_idx]
+        best_candidates = candidate_run_list[best_idx]
         _write_candidates(best_candidates, "als", args.outputs_dir / "candidates_als.csv")
+        candidate_runs["als"] = best_candidates
         comparison_rows.append({"model_name": "als", **tuning_rows[best_idx]})
         pd.DataFrame(tuning_rows).to_csv(args.outputs_dir / "als_tuning_results.csv", index=False)
         print(f"Wrote {args.outputs_dir / 'als_tuning_results.csv'} ({len(tuning_rows)} rows)")
 
     if "bpr" in models:
         tuning_rows = []
-        candidate_runs = []
+        candidate_run_list = []
         for params in _parse_bpr_grid(args.bpr_grid):
             model = BPRRecommender(
                 **params,
@@ -371,11 +510,12 @@ def main() -> int:
             row = _evaluate("bpr", candidates, eval_frame, train, metric_features, eval_ks)
             row.update(params)
             tuning_rows.append(row)
-            candidate_runs.append(candidates)
+            candidate_run_list.append(candidates)
 
         best_idx = _select_best(tuning_rows, primary_eval_k)
-        best_candidates = candidate_runs[best_idx]
+        best_candidates = candidate_run_list[best_idx]
         _write_candidates(best_candidates, "bpr", args.outputs_dir / "candidates_bpr.csv")
+        candidate_runs["bpr"] = best_candidates
         comparison_rows.append({"model_name": "bpr", **tuning_rows[best_idx]})
         pd.DataFrame(tuning_rows).to_csv(args.outputs_dir / "bpr_tuning_results.csv", index=False)
         print(f"Wrote {args.outputs_dir / 'bpr_tuning_results.csv'} ({len(tuning_rows)} rows)")
