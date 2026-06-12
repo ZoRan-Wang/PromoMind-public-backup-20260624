@@ -65,6 +65,18 @@ Prepare processed files from CSV exports in `data/raw/`:
 python scripts/prepare_dataset.py --raw-dir data/raw --processed-dir data/processed
 ```
 
+Run first-stage candidate generation models:
+
+```bash
+python scripts/run_candidate_models.py --models popularity,category,itemknn,als --k 50
+```
+
+Run all implemented Member B models, including BPR:
+
+```bash
+python scripts/run_candidate_models.py --models all --k 50
+```
+
 Run tests:
 
 ```bash

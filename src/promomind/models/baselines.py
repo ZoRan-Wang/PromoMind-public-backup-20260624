@@ -57,17 +57,33 @@ def popularity_recommendations(
 
     user_values = pd.Series(users if users is not None else interactions[user_col].dropna().unique())
     popularity = _item_popularity(interactions, item_col=item_col, weight_col=weight_col)
-
-    candidates = user_values.rename(USER_COL).to_frame().merge(popularity, how="cross")
+    popularity = popularity.sort_values([SCORE_COL, ITEM_COL], ascending=[False, True])
+    popular_rows = list(popularity.itertuples(index=False, name=None))
 
     if exclude_seen:
-        seen = interactions[[user_col, item_col]].drop_duplicates().rename(
-            columns={user_col: USER_COL, item_col: ITEM_COL}
+        seen_by_user = (
+            interactions[[user_col, item_col]]
+            .drop_duplicates()
+            .groupby(user_col)[item_col]
+            .apply(set)
+            .to_dict()
         )
-        candidates = candidates.merge(seen.assign(_seen=True), on=[USER_COL, ITEM_COL], how="left")
-        candidates = candidates[candidates["_seen"].isna()].drop(columns="_seen")
+    else:
+        seen_by_user = {}
 
-    return sort_candidates(candidates, k=k)
+    records: list[dict[str, object]] = []
+    for user in user_values:
+        seen = seen_by_user.get(user, set())
+        added = 0
+        for item, score in popular_rows:
+            if item in seen:
+                continue
+            records.append({USER_COL: user, ITEM_COL: item, SCORE_COL: score})
+            added += 1
+            if added >= k:
+                break
+
+    return sort_candidates(pd.DataFrame(records, columns=[USER_COL, ITEM_COL, SCORE_COL]), k=k)
 
 
 def category_popularity_recommendations(
@@ -136,5 +152,26 @@ def category_popularity_recommendations(
         candidates = candidates.merge(seen.assign(_seen=True), on=[USER_COL, ITEM_COL], how="left")
         candidates = candidates[candidates["_seen"].isna()].drop(columns="_seen")
 
-    return sort_candidates(candidates, k=k)
+    # Grocery category metadata can be sparse or too granular. If a household's
+    # preferred categories do not leave enough unseen products, fill from global
+    # popularity so the baseline remains evaluable for every warm user.
+    fallback = popularity_recommendations(
+        interactions,
+        users=user_values,
+        k=k,
+        user_col=user_col,
+        item_col=item_col,
+        weight_col=weight_col,
+        exclude_seen=exclude_seen,
+    ).drop(columns=["rank"], errors="ignore")
+    fallback[category_col] = "global_fallback"
+    if not fallback.empty:
+        positive_primary = candidates[SCORE_COL][candidates[SCORE_COL] > 0]
+        if not positive_primary.empty:
+            fallback[SCORE_COL] = fallback[SCORE_COL] * positive_primary.min() * 1e-6
+        else:
+            fallback[SCORE_COL] = fallback[SCORE_COL] * 1e-6
 
+    combined = pd.concat([candidates, fallback], ignore_index=True)
+    combined = combined.drop_duplicates([USER_COL, ITEM_COL], keep="first")
+    return sort_candidates(combined, k=k)
