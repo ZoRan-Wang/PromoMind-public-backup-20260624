@@ -25,10 +25,10 @@
 
 - Popularity baseline ranks products by global purchase volume.
 - Category popularity adds household-level category preference.
-- Seen products are filtered out when generating candidates.
+- Repeat purchases are allowed in the main experiment because grocery baskets contain recurring staples.
 - These baselines set the minimum performance bar for ALS and BPR.
 
-**Speaker note:** A grocery recommender can look good by repeatedly recommending common staples. That is why we compare advanced models against both global popularity and a category-aware version.
+**Speaker note:** A grocery recommender should not automatically remove previously purchased products. In supermarkets, repeat purchases are part of the target behavior, so we separately monitor novelty and coverage instead of forcing every recommendation to be new.
 
 ## Slide 3: Collaborative Filtering Models
 

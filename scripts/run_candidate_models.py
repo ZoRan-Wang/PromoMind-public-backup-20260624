@@ -62,6 +62,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-k", type=int, nargs="+", default=[10, 20])
     parser.add_argument("--weight-col", default=schema.QUANTITY)
     parser.add_argument("--category-col", default="auto")
+    parser.add_argument(
+        "--exclude-seen",
+        action="store_true",
+        help=(
+            "Filter products already purchased by the household. Off by default because "
+            "next-basket grocery recommendation should allow staple repeat purchases."
+        ),
+    )
     parser.add_argument("--itemknn-neighbors", type=int, default=100)
     parser.add_argument(
         "--als-grid",
@@ -278,6 +286,7 @@ def main() -> int:
             user_col=schema.HOUSEHOLD_ID,
             item_col=schema.PRODUCT_ID,
             weight_col=weight_col,
+            exclude_seen=args.exclude_seen,
         )
         _write_candidates(candidates, "popularity", args.outputs_dir / "candidates_popularity.csv")
         comparison_rows.append(
@@ -294,6 +303,7 @@ def main() -> int:
             item_col=schema.PRODUCT_ID,
             category_col=category_col,
             weight_col=weight_col,
+            exclude_seen=args.exclude_seen,
         )
         _write_candidates(
             candidates,
@@ -312,7 +322,7 @@ def main() -> int:
             item_col=schema.PRODUCT_ID,
             weight_col=weight_col,
         )
-        candidates = model.recommend(users, k=args.k)
+        candidates = model.recommend(users, k=args.k, exclude_seen=args.exclude_seen)
         _write_candidates(candidates, "itemknn", args.outputs_dir / "candidates_itemknn.csv")
         comparison_rows.append(
             _evaluate("itemknn", candidates, eval_frame, train, metric_features, eval_ks)
@@ -329,7 +339,7 @@ def main() -> int:
                 item_col=schema.PRODUCT_ID,
                 weight_col=weight_col,
             )
-            candidates = model.recommend(users, k=args.k)
+            candidates = model.recommend(users, k=args.k, exclude_seen=args.exclude_seen)
             row = _evaluate("als", candidates, eval_frame, train, metric_features, eval_ks)
             row.update(params)
             row["backend"] = model.backend_
@@ -357,7 +367,7 @@ def main() -> int:
                 item_col=schema.PRODUCT_ID,
                 weight_col=weight_col,
             )
-            candidates = model.recommend(users, k=args.k)
+            candidates = model.recommend(users, k=args.k, exclude_seen=args.exclude_seen)
             row = _evaluate("bpr", candidates, eval_frame, train, metric_features, eval_ks)
             row.update(params)
             tuning_rows.append(row)

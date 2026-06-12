@@ -18,7 +18,7 @@ The output contract is:
 
 ### 1. Popularity Baseline
 
-Ranks products by global purchase frequency or quantity-weighted purchase volume in the training split. Every household receives the same global product ranking, with already-purchased products filtered out by default.
+Ranks products by global purchase frequency or quantity-weighted purchase volume in the training split. Every household receives the same global product ranking. For the main grocery next-basket task, already-purchased products are allowed because staple repeat purchases are valid recommendations.
 
 Purpose: lower-bound baseline. If advanced models cannot beat this, the modeling setup needs to be revisited.
 
@@ -96,6 +96,12 @@ Run all B models including BPR:
 
 ```powershell
 python scripts/run_candidate_models.py --models all --k 50
+```
+
+The runner allows repeat purchases by default. This matches grocery basket prediction, where previously purchased staples are often the most realistic next-basket items. To run a discovery-only experiment that filters previously purchased products, add:
+
+```powershell
+python scripts/run_candidate_models.py --models all --k 50 --exclude-seen
 ```
 
 Run a fast smoke test after generating synthetic sample data:
