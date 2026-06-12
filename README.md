@@ -77,6 +77,12 @@ Run all implemented Member B models, including ALS and BPR comparisons:
 python scripts/run_candidate_models.py --models all --k 50
 ```
 
+Run the official Cornac TIFUKNN next-basket benchmark:
+
+```bash
+python scripts/run_cornac_nbr_models.py --k 50 --tifuknn-grid 300:0.9:0.7:0.7:7
+```
+
 For grocery next-basket prediction, repeat purchases are allowed by default. Use `--exclude-seen` only for a discovery-only experiment.
 
 Run tests:

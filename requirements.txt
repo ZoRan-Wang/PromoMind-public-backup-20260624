@@ -7,3 +7,5 @@ streamlit>=1.32
 # Optional model backend for ALS/BPR experiments.
 implicit>=0.7
 
+# Optional community next-basket benchmark implementation.
+cornac==2.2.2
