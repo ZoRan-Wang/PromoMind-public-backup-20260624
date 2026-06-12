@@ -195,18 +195,25 @@ def _evaluate(
     eval_frame: pd.DataFrame,
     train: pd.DataFrame,
     item_features: pd.DataFrame,
+    eval_ks: list[int],
 ) -> dict[str, object]:
     row: dict[str, object] = {"model_name": model_name, "n_candidates": len(candidates)}
     truth = _canonical_truth(eval_frame)
     train_canonical = _canonical_train(train)
     catalog = train_canonical[ITEM_COL].dropna().unique()
 
-    for k in [10, 20]:
+    for k in eval_ks:
         row[f"recall_at_{k}"] = recall_at_k(candidates, truth, k=k)
         row[f"ndcg_at_{k}"] = ndcg_at_k(candidates, truth, k=k)
-    row["coverage_at_20"] = coverage(candidates, catalog, k=20)
-    row["diversity_at_20"] = diversity(candidates, item_features, k=20, category_col="category")
-    row["novelty_at_20"] = novelty(candidates, train_canonical, k=20)
+    summary_k = max(eval_ks)
+    row[f"coverage_at_{summary_k}"] = coverage(candidates, catalog, k=summary_k)
+    row[f"diversity_at_{summary_k}"] = diversity(
+        candidates,
+        item_features,
+        k=summary_k,
+        category_col="category",
+    )
+    row[f"novelty_at_{summary_k}"] = novelty(candidates, train_canonical, k=summary_k)
     return row
 
 
@@ -227,11 +234,11 @@ def _write_candidates(candidates: pd.DataFrame, model_name: str, path: Path) -> 
     print(f"Wrote {path} ({len(out)} rows)")
 
 
-def _select_best(rows: list[dict[str, object]]) -> int:
+def _select_best(rows: list[dict[str, object]], primary_k: int) -> int:
     scores = [
         (
-            float(row.get("ndcg_at_10", 0.0)),
-            float(row.get("recall_at_10", 0.0)),
+            float(row.get(f"ndcg_at_{primary_k}", 0.0)),
+            float(row.get(f"recall_at_{primary_k}", 0.0)),
             -idx,
         )
         for idx, row in enumerate(rows)
@@ -243,6 +250,10 @@ def main() -> int:
     args = parse_args()
     if args.k <= 0:
         raise ValueError("--k must be positive")
+    eval_ks = sorted(set(args.eval_k))
+    if not eval_ks or min(eval_ks) <= 0:
+        raise ValueError("--eval-k values must be positive")
+    primary_eval_k = eval_ks[0]
 
     args.outputs_dir.mkdir(parents=True, exist_ok=True)
     train = _read_required_csv(args.processed_dir / args.train_file)
@@ -269,7 +280,9 @@ def main() -> int:
             weight_col=weight_col,
         )
         _write_candidates(candidates, "popularity", args.outputs_dir / "candidates_popularity.csv")
-        comparison_rows.append(_evaluate("popularity", candidates, eval_frame, train, metric_features))
+        comparison_rows.append(
+            _evaluate("popularity", candidates, eval_frame, train, metric_features, eval_ks)
+        )
 
     if "category" in models:
         candidates = category_popularity_recommendations(
@@ -288,7 +301,7 @@ def main() -> int:
             args.outputs_dir / "candidates_category_popularity.csv",
         )
         comparison_rows.append(
-            _evaluate("category_popularity", candidates, eval_frame, train, metric_features)
+            _evaluate("category_popularity", candidates, eval_frame, train, metric_features, eval_ks)
         )
 
     if "itemknn" in models:
@@ -301,7 +314,9 @@ def main() -> int:
         )
         candidates = model.recommend(users, k=args.k)
         _write_candidates(candidates, "itemknn", args.outputs_dir / "candidates_itemknn.csv")
-        comparison_rows.append(_evaluate("itemknn", candidates, eval_frame, train, metric_features))
+        comparison_rows.append(
+            _evaluate("itemknn", candidates, eval_frame, train, metric_features, eval_ks)
+        )
 
     if "als" in models:
         tuning_rows: list[dict[str, object]] = []
@@ -315,13 +330,13 @@ def main() -> int:
                 weight_col=weight_col,
             )
             candidates = model.recommend(users, k=args.k)
-            row = _evaluate("als", candidates, eval_frame, train, metric_features)
+            row = _evaluate("als", candidates, eval_frame, train, metric_features, eval_ks)
             row.update(params)
             row["backend"] = model.backend_
             tuning_rows.append(row)
             candidate_runs.append(candidates)
 
-        best_idx = _select_best(tuning_rows)
+        best_idx = _select_best(tuning_rows, primary_eval_k)
         best_candidates = candidate_runs[best_idx]
         _write_candidates(best_candidates, "als", args.outputs_dir / "candidates_als.csv")
         comparison_rows.append({"model_name": "als", **tuning_rows[best_idx]})
@@ -343,12 +358,12 @@ def main() -> int:
                 weight_col=weight_col,
             )
             candidates = model.recommend(users, k=args.k)
-            row = _evaluate("bpr", candidates, eval_frame, train, metric_features)
+            row = _evaluate("bpr", candidates, eval_frame, train, metric_features, eval_ks)
             row.update(params)
             tuning_rows.append(row)
             candidate_runs.append(candidates)
 
-        best_idx = _select_best(tuning_rows)
+        best_idx = _select_best(tuning_rows, primary_eval_k)
         best_candidates = candidate_runs[best_idx]
         _write_candidates(best_candidates, "bpr", args.outputs_dir / "candidates_bpr.csv")
         comparison_rows.append({"model_name": "bpr", **tuning_rows[best_idx]})
