@@ -321,3 +321,183 @@ class TIFUKNNRecommender:
                 )
 
         return sort_candidates(pd.DataFrame(records, columns=[USER_COL, ITEM_COL, SCORE_COL]), k=k)
+
+
+@dataclass
+class RecencyAwareUserCFRecommender:
+    """UPCF-style recency-aware user collaborative filtering.
+
+    This model follows the core idea of UP-CF@r: represent each household by
+    item popularity inside its recent baskets, then aggregate those
+    recency-aware popularity vectors from asymmetric-cosine nearest users.
+    """
+
+    recency: int = 1
+    locality: float = 1.0
+    asymmetry: float = 0.25
+
+    def __post_init__(self) -> None:
+        if self.recency < 0:
+            raise ValueError("recency must be non-negative; use 0 for all baskets")
+        if self.locality <= 0:
+            raise ValueError("locality must be positive")
+        if not 0 <= self.asymmetry <= 1:
+            raise ValueError("asymmetry must be between 0 and 1")
+
+        self.users_: list[Hashable] = []
+        self.items_: list[Hashable] = []
+        self.user_index_: dict[Hashable, int] = {}
+        self.item_index_: dict[Hashable, int] = {}
+        self.user_item_matrix_: sparse.csr_matrix | None = None
+        self.user_wise_popularity_: sparse.csr_matrix | None = None
+        self.score_matrix_: sparse.csr_matrix | None = None
+
+    def fit(
+        self,
+        interactions: pd.DataFrame,
+        user_col: str = USER_COL,
+        item_col: str = ITEM_COL,
+        basket_col: str | None = schema.BASKET_ID,
+        time_col: str | None = schema.WEEK,
+    ) -> "RecencyAwareUserCFRecommender":
+        """Fit UPCF-style user similarity and recent-basket popularity scores."""
+
+        required = [user_col, item_col]
+        missing = [col for col in required if col not in interactions.columns]
+        if missing:
+            raise ValueError(f"interactions is missing required columns: {missing}")
+
+        work = interactions.dropna(subset=[user_col, item_col]).copy()
+        if work.empty:
+            self.score_matrix_ = sparse.csr_matrix((0, 0), dtype=np.float32)
+            return self
+
+        self.users_ = _ordered_unique(work[user_col])
+        self.items_ = _ordered_unique(work[item_col])
+        self.user_index_ = {user: idx for idx, user in enumerate(self.users_)}
+        self.item_index_ = {item: idx for idx, item in enumerate(self.items_)}
+
+        self.user_item_matrix_, self.user_wise_popularity_ = self._build_user_matrices(
+            work,
+            user_col=user_col,
+            item_col=item_col,
+            basket_col=basket_col,
+            time_col=time_col,
+        )
+        similarity = self._asymmetric_cosine(self.user_item_matrix_)
+        if self.locality != 1:
+            similarity = np.power(similarity, self.locality, dtype=np.float32)
+        self.score_matrix_ = sparse.csr_matrix(similarity @ self.user_wise_popularity_).tocsr()
+        return self
+
+    def _build_user_matrices(
+        self,
+        work: pd.DataFrame,
+        user_col: str,
+        item_col: str,
+        basket_col: str | None,
+        time_col: str | None,
+    ) -> tuple[sparse.csr_matrix, sparse.csr_matrix]:
+        if time_col and time_col in work.columns:
+            work["_time"] = pd.to_numeric(work[time_col], errors="coerce").fillna(0.0)
+        else:
+            work["_time"] = 0.0
+
+        if basket_col and basket_col in work.columns:
+            work["_basket_key"] = work[basket_col].astype("string")
+        else:
+            work["_basket_key"] = work.groupby(user_col).cumcount().astype("string")
+
+        work = work.drop_duplicates([user_col, "_basket_key", item_col])
+
+        ui_rows: list[int] = []
+        ui_cols: list[int] = []
+        pop_rows: list[int] = []
+        pop_cols: list[int] = []
+        pop_data: list[float] = []
+
+        for user, user_frame in work.groupby(user_col, sort=False):
+            user_idx = self.user_index_[user]
+            user_items = user_frame[item_col].dropna().unique().tolist()
+            ui_rows.extend([user_idx] * len(user_items))
+            ui_cols.extend([self.item_index_[item] for item in user_items])
+
+            baskets = (
+                user_frame[["_basket_key", "_time", item_col]]
+                .groupby(["_basket_key", "_time"], sort=False)[item_col]
+                .apply(lambda values: set(values.dropna().tolist()))
+                .reset_index(name="_items")
+                .sort_values(["_time", "_basket_key"])
+            )
+            if self.recency > 0:
+                baskets = baskets.tail(self.recency)
+            denominator = max(len(baskets), 1)
+            counts: dict[Hashable, int] = {}
+            for items in baskets["_items"]:
+                for item in items:
+                    counts[item] = counts.get(item, 0) + 1
+            for item, count in counts.items():
+                pop_rows.append(user_idx)
+                pop_cols.append(self.item_index_[item])
+                pop_data.append(count / denominator)
+
+        shape = (len(self.users_), len(self.items_))
+        user_item = sparse.csr_matrix(
+            (np.ones(len(ui_rows), dtype=np.float32), (ui_rows, ui_cols)),
+            shape=shape,
+            dtype=np.float32,
+        )
+        user_item.sum_duplicates()
+        user_item.data[:] = 1.0
+        user_popularity = sparse.csr_matrix(
+            (np.asarray(pop_data, dtype=np.float32), (pop_rows, pop_cols)),
+            shape=shape,
+            dtype=np.float32,
+        )
+        user_popularity.sum_duplicates()
+        return user_item, user_popularity
+
+    def _asymmetric_cosine(self, user_item: sparse.csr_matrix) -> np.ndarray:
+        co_counts = (user_item @ user_item.T).toarray().astype(np.float32)
+        counts = np.asarray(user_item.sum(axis=1)).ravel().astype(np.float32)
+        counts[counts == 0] = 1.0
+        denominator = np.power(counts[:, None], self.asymmetry) * np.power(
+            counts[None, :],
+            1.0 - self.asymmetry,
+        )
+        similarity = np.divide(
+            co_counts,
+            denominator,
+            out=np.zeros_like(co_counts, dtype=np.float32),
+            where=denominator > 0,
+        )
+        return similarity
+
+    def recommend(
+        self,
+        users: Iterable[Hashable],
+        k: int = 10,
+        exclude_seen: bool = False,
+    ) -> pd.DataFrame:
+        """Return top-k UPCF-style candidates."""
+
+        if k <= 0:
+            raise ValueError("k must be positive")
+        if self.score_matrix_ is None:
+            raise RuntimeError("Call fit() before recommend().")
+
+        records: list[dict[str, object]] = []
+        for user in users:
+            if user not in self.user_index_:
+                continue
+            user_idx = self.user_index_[user]
+            scores = self.score_matrix_.getrow(user_idx).toarray().ravel().astype(np.float32)
+            if exclude_seen and self.user_item_matrix_ is not None:
+                scores[self.user_item_matrix_.getrow(user_idx).indices] = -np.inf
+
+            for item_idx, score in _top_k_from_scores(scores, k):
+                if score <= 0:
+                    continue
+                records.append({USER_COL: user, ITEM_COL: self.items_[item_idx], SCORE_COL: score})
+
+        return sort_candidates(pd.DataFrame(records, columns=[USER_COL, ITEM_COL, SCORE_COL]), k=k)

@@ -9,7 +9,7 @@ What we can claim defensibly:
 - The task is a grocery next-basket recommendation task.
 - In next-basket recommendation literature, strong conventional methods include TOP / personal frequency, TIFU-KNN, and recency-aware collaborative filtering.
 - On our time-based split, repeat-aware next-basket models strongly outperform generic ALS/BPR matrix factorization.
-- Member B's final candidate source should be `hybrid_strong` for best short-list ranking quality, with `tifu_knn` as the strongest single model.
+- Member B's final candidate source should be `hybrid_strong`, with `tifu_knn` as the strongest single non-ensemble model.
 
 ## Literature Basis
 
@@ -39,8 +39,9 @@ python scripts/run_candidate_models.py --models all --k 50 --tifu-grid 50:0.7:0.
 | Personal Top Frequency | 0.0984 | 0.3790 | 0.1462 | 0.3402 |
 | Category Popularity | 0.0460 | 0.1542 | 0.0728 | 0.1493 |
 | ItemKNN | 0.0399 | 0.1980 | 0.0591 | 0.1659 |
-| TIFU-KNN style | **0.1011** | 0.3851 | **0.1503** | 0.3474 |
-| Strong Hybrid | 0.1001 | **0.3888** | 0.1492 | **0.3485** |
+| UPCF-style | 0.0874 | 0.3278 | 0.1242 | 0.2831 |
+| TIFU-KNN style | 0.1011 | 0.3851 | 0.1503 | 0.3474 |
+| Strong Hybrid | **0.1029** | **0.3935** | **0.1511** | **0.3528** |
 | ALS | 0.0372 | 0.0743 | 0.0596 | 0.0788 |
 | BPR | 0.0046 | 0.0143 | 0.0066 | 0.0127 |
 
@@ -48,7 +49,7 @@ python scripts/run_candidate_models.py --models all --k 50 --tifu-grid 50:0.7:0.
 
 Use this wording:
 
-> Because The Complete Journey does not have a single official leaderboard, we benchmark against community-standard next-basket methods. After correcting the grocery task setup to allow repeat purchases, repeat-aware models dominate generic matrix factorization. Our strongest single model is TIFU-KNN style candidate generation, and our strongest validation ranking source is a TIFU + personal-frequency + ItemKNN hybrid.
+> Because The Complete Journey does not have a single official leaderboard, we benchmark against community-standard next-basket methods. After correcting the grocery task setup to allow repeat purchases, repeat-aware models dominate generic matrix factorization. Our strongest single non-ensemble model is TIFU-KNN style candidate generation, and our strongest validation candidate source is a TIFU + personal-frequency + UPCF + ItemKNN hybrid.
 
 Avoid this wording:
 

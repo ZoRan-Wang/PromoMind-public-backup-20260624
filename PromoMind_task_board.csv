@@ -21,7 +21,7 @@ B5,B,Models,P0,A7,Day 3,"ALS first run","candidates_als.csv generated using full
 B6,B,Models,P0,B5,Day 4,"ALS tuning","als_tuning_results.csv contains tested factors regularization iterations alpha","Implemented; full run verified"
 B7,B,Models,P1,B5,Day 4,"BPR first run","candidates_bpr.csv generated if time allows","Implemented; full run verified"
 B8,B,Models,P1,B7,Day 5,"BPR tuning","bpr_tuning_results.csv ready if BPR completed","Implemented; full run verified"
-B9,B,Models,P0,B2 B3 B5,Day 5,"Model comparison table","Popularity Category Popularity PersonalTopFreq ItemKNN TIFU-KNN Hybrid ALS BPR compared where available","Implemented; strong next-basket full run verified"
+B9,B,Models,P0,B2 B3 B5,Day 5,"Model comparison table","Popularity Category Popularity PersonalTopFreq ItemKNN TIFU-KNN UPCF Hybrid ALS BPR compared where available","Implemented; strong next-basket full run verified"
 B10,B,Models,P1,B9,Day 5,"Model PPT pages","Candidate generation baselines TIFU-KNN Hybrid ALS/BPR comparison slides ready","Drafted in docs/member_b_slide_content.md"
 B11,B,Models,P1,B9,Day 6,"Model report section","Strong next-basket and matrix factorization report text ready","Drafted in docs/member_b_modeling.md"
 C1,C,Reranking,P0,A5,Day 1,"Reranker smoke test","Simple reranking runs on sample candidates",Not started

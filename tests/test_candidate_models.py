@@ -6,7 +6,11 @@ from promomind.models.baselines import category_popularity_recommendations
 from promomind.models.bpr import BPRRecommender
 from promomind.models.candidates import ITEM_COL, RANK_COL, SCORE_COL, USER_COL
 from promomind.models.itemknn import ItemKNNRecommender
-from promomind.models.next_basket import PersonalTopFrequencyRecommender, TIFUKNNRecommender
+from promomind.models.next_basket import (
+    PersonalTopFrequencyRecommender,
+    RecencyAwareUserCFRecommender,
+    TIFUKNNRecommender,
+)
 from promomind.models.sparse import build_interaction_matrix
 
 
@@ -195,3 +199,41 @@ def test_tifu_knn_recommends_with_candidate_schema():
 
     _assert_candidate_schema(candidates)
     assert len(candidates) > 0
+
+
+def test_recency_aware_user_cf_recommends_with_candidate_schema():
+    train = _training_interactions().assign(
+        basket_id=["B1", "B2", "B3", "B4", "B5", "B6", "B7"],
+        week=[1, 2, 1, 2, 1, 2, 3],
+    )
+
+    model = RecencyAwareUserCFRecommender(recency=2, locality=1, asymmetry=0.25).fit(
+        train,
+        user_col="household_id",
+        item_col="product_id",
+        basket_col="basket_id",
+        time_col="week",
+    )
+    candidates = model.recommend(["H1"], k=3)
+
+    _assert_candidate_schema(candidates)
+    assert len(candidates) > 0
+
+
+def test_recency_aware_user_cf_can_exclude_seen_items():
+    train = _training_interactions().assign(
+        basket_id=["B1", "B2", "B3", "B4", "B5", "B6", "B7"],
+        week=[1, 2, 1, 2, 1, 2, 3],
+    )
+
+    model = RecencyAwareUserCFRecommender(recency=0, locality=1, asymmetry=0.25).fit(
+        train,
+        user_col="household_id",
+        item_col="product_id",
+        basket_col="basket_id",
+        time_col="week",
+    )
+    candidates = model.recommend(["H1"], k=2, exclude_seen=True)
+
+    _assert_candidate_schema(candidates)
+    assert set(candidates[ITEM_COL]).isdisjoint({"P1", "P2"})

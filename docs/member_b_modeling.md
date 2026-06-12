@@ -69,14 +69,21 @@ Purpose: community-level strong baseline for next-basket grocery recommendation.
 Combines the best validation candidate sources by rank:
 
 ```text
-hybrid_score = 0.5 * TIFU-KNN rank score
-             + 0.4 * Personal Top Frequency rank score
-             + 0.1 * ItemKNN rank score
+hybrid_score = 0.55 * TIFU-KNN rank score
+             + 0.35 * Personal Top Frequency rank score
+             + 0.05 * UPCF rank score
+             + 0.05 * ItemKNN rank score
 ```
 
 Purpose: final Member B candidate source for downstream promotion-aware reranking. It improves short-list ranking quality while keeping the model interpretable.
 
-### 7. Implicit ALS
+### 7. UPCF-style Recency-aware User CF
+
+Builds user-wise popularity vectors from each household's recent baskets and aggregates them through asymmetric-cosine household similarity.
+
+Purpose: community-standard next-basket comparison model. On this split it improves over generic ItemKNN/ALS, but does not beat TIFU-KNN or the strong hybrid.
+
+### 8. Implicit ALS
 
 Implements implicit-feedback Alternating Least Squares. The wrapper supports:
 
@@ -93,7 +100,7 @@ Default tuning grid:
 
 Purpose: matrix-factorization comparison model. On this split, ALS is useful for coverage and novelty but is not the strongest next-basket model.
 
-### 8. BPR Matrix Factorization
+### 9. BPR Matrix Factorization
 
 Implements a lightweight Bayesian Personalized Ranking SGD model with pairwise positive-vs-negative item sampling.
 
@@ -123,7 +130,7 @@ python scripts/clean_completejourney.py
 Run the minimum B workstream models:
 
 ```powershell
-python scripts/run_candidate_models.py --models popularity,personal_topfreq,category,itemknn,tifu_knn,hybrid_strong --k 50
+python scripts/run_candidate_models.py --models popularity,personal_topfreq,category,itemknn,tifu_knn,upcf,hybrid_strong --k 50
 ```
 
 Run all B models including BPR:
@@ -157,10 +164,12 @@ Generated files are written under `outputs/`, which is intentionally ignored by 
 | `outputs/candidates_category_popularity.csv` | household category-affinity candidates |
 | `outputs/candidates_itemknn.csv` | item-based collaborative filtering candidates |
 | `outputs/candidates_tifu_knn.csv` | TIFU-KNN style next-basket candidates |
+| `outputs/candidates_upcf.csv` | UPCF-style recency-aware user CF candidates |
 | `outputs/candidates_hybrid_strong.csv` | final strong hybrid candidate source |
 | `outputs/candidates_als.csv` | best ALS candidate output from tuning grid |
 | `outputs/candidates_bpr.csv` | best BPR candidate output when BPR is requested |
 | `outputs/tifu_tuning_results.csv` | TIFU-KNN parameter grid and validation metrics |
+| `outputs/upcf_tuning_results.csv` | UPCF parameter grid and validation metrics |
 | `outputs/als_tuning_results.csv` | ALS parameter grid and validation metrics |
 | `outputs/bpr_tuning_results.csv` | BPR parameter grid and validation metrics |
 | `outputs/model_comparison.csv` | final model comparison table |
@@ -181,15 +190,16 @@ Full run settings:
 | Category Popularity | 0.0460 | 0.1542 | 0.0728 | 0.1493 |
 | ItemKNN | 0.0399 | 0.1980 | 0.0591 | 0.1659 |
 | Personal Top Frequency | 0.0984 | 0.3790 | 0.1462 | 0.3402 |
-| TIFU-KNN style | **0.1011** | 0.3851 | **0.1503** | 0.3474 |
-| Strong Hybrid | 0.1001 | **0.3888** | 0.1492 | **0.3485** |
+| UPCF-style | 0.0874 | 0.3278 | 0.1242 | 0.2831 |
+| TIFU-KNN style | 0.1011 | 0.3851 | 0.1503 | 0.3474 |
+| Strong Hybrid | **0.1029** | **0.3935** | **0.1511** | **0.3528** |
 | ALS | 0.0372 | 0.0743 | 0.0596 | 0.0788 |
 | BPR | 0.0046 | 0.0143 | 0.0066 | 0.0127 |
 
 Interpretation:
 
-- The strongest single model is TIFU-KNN style, with the best Recall@10 and Recall@20.
-- The strongest ranking source is the hybrid ensemble, with the best NDCG@10 and NDCG@20.
+- The strongest single model is TIFU-KNN style among non-ensemble models.
+- The strongest overall candidate source is the hybrid ensemble, with the best Recall@10, NDCG@10, Recall@20, and NDCG@20.
 - ALS and BPR should be reported as matrix-factorization comparisons, not as the main result.
 - The project should use `candidates_hybrid_strong.csv` or `candidates_tifu_knn.csv` as Member B's handoff to promotion-aware reranking.
 

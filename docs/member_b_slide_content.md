@@ -42,6 +42,7 @@
 - Build each household's time-decayed product-frequency vector.
 - Find similar households using cosine similarity.
 - Combine personal repeat preference with neighbor preference.
+- Add UPCF-style recency-aware user CF as another community-standard comparison.
 - Output the same Top-K candidate schema for reranking.
 
 **Speaker note:** This follows the next-basket recommendation literature, where TIFU-KNN and recency-aware user collaborative filtering are strong methods on grocery-style datasets.
@@ -55,8 +56,8 @@
 **Bullets:**
 
 - Metrics: Recall@10/20, NDCG@10/20, Coverage@20, Diversity@20, Novelty@20.
-- TIFU-KNN has the best Recall@10 and Recall@20.
-- The strong hybrid has the best NDCG@10 and NDCG@20.
+- TIFU-KNN is the strongest single non-ensemble next-basket model.
+- The strong hybrid has the best Recall@10, NDCG@10, Recall@20, and NDCG@20.
 - Final handoff files: `candidates_tifu_knn.csv` and `candidates_hybrid_strong.csv`.
 
 **Speaker note:** ALS and BPR remain useful comparison models, but they are not the final accuracy leaders on this grocery split. Promotion-aware business utility is evaluated after Member C's reranking stage.
@@ -71,7 +72,8 @@
 
 - Personal Top Frequency: Recall@10 0.0984, NDCG@10 0.3790.
 - TIFU-KNN style: Recall@10 0.1011, NDCG@10 0.3851.
-- Strong Hybrid: Recall@10 0.1001, NDCG@10 0.3888.
+- UPCF-style: Recall@10 0.0874, NDCG@10 0.3278.
+- Strong Hybrid: Recall@10 0.1029, NDCG@10 0.3935.
 - Previous generic models are lower: ItemKNN NDCG@10 0.1980, ALS NDCG@10 0.0743.
 
 **Speaker note:** The key takeaway is methodological: on grocery data, the community-level answer is not "use a deeper model first"; it is "model repeat consumption and temporal frequency correctly."

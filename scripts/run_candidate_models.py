@@ -43,6 +43,7 @@ from promomind.models.candidates import (  # noqa: E402
 from promomind.models.itemknn import ItemKNNRecommender  # noqa: E402
 from promomind.models.next_basket import (  # noqa: E402
     PersonalTopFrequencyRecommender,
+    RecencyAwareUserCFRecommender,
     TIFUKNNRecommender,
 )
 
@@ -68,7 +69,7 @@ def parse_args() -> argparse.Namespace:
         default="popularity,personal_topfreq,category,itemknn,tifu_knn,als",
         help=(
             "Comma-separated list from popularity,personal_topfreq,category,itemknn,"
-            "tifu_knn,hybrid_strong,als,bpr,all."
+            "tifu_knn,upcf,hybrid_strong,als,bpr,all."
         ),
     )
     parser.add_argument("--k", type=int, default=50, help="Number of candidates per household.")
@@ -88,6 +89,11 @@ def parse_args() -> argparse.Namespace:
         "--tifu-grid",
         default="50:0.7:0.95,100:0.7:0.95,200:0.7:0.95",
         help="TIFU-KNN grid as neighbors:alpha:basket_decay entries.",
+    )
+    parser.add_argument(
+        "--upcf-grid",
+        default="5:2:0.25,3:2:0.25,1:2:0.25,5:1:0.25,1:1:0.25",
+        help="UPCF grid as recency:locality:asymmetry entries. Recency 0 means all baskets.",
     )
     parser.add_argument(
         "--als-grid",
@@ -125,6 +131,7 @@ def _parse_model_list(value: str) -> list[str]:
             "category",
             "itemknn",
             "tifu_knn",
+            "upcf",
             "hybrid_strong",
             "als",
             "bpr",
@@ -135,6 +142,7 @@ def _parse_model_list(value: str) -> list[str]:
         "category",
         "itemknn",
         "tifu_knn",
+        "upcf",
         "hybrid_strong",
         "als",
         "bpr",
@@ -190,6 +198,22 @@ def _parse_tifu_grid(value: str) -> list[dict[str, float | int]]:
                 "n_neighbors": int(n_neighbors),
                 "alpha": float(alpha),
                 "basket_decay": float(basket_decay),
+            }
+        )
+    return params
+
+
+def _parse_upcf_grid(value: str) -> list[dict[str, float | int]]:
+    params = []
+    for entry in value.split(","):
+        if not entry.strip():
+            continue
+        recency, locality, asymmetry = entry.split(":")
+        params.append(
+            {
+                "recency": int(recency),
+                "locality": float(locality),
+                "asymmetry": float(asymmetry),
             }
         )
     return params
@@ -454,12 +478,38 @@ def main() -> int:
         pd.DataFrame(tuning_rows).to_csv(args.outputs_dir / "tifu_tuning_results.csv", index=False)
         print(f"Wrote {args.outputs_dir / 'tifu_tuning_results.csv'} ({len(tuning_rows)} rows)")
 
+    if "upcf" in models:
+        tuning_rows: list[dict[str, object]] = []
+        candidate_run_list: list[pd.DataFrame] = []
+        for params in _parse_upcf_grid(args.upcf_grid):
+            model = RecencyAwareUserCFRecommender(**params)
+            model.fit(
+                train,
+                user_col=schema.HOUSEHOLD_ID,
+                item_col=schema.PRODUCT_ID,
+                basket_col=schema.BASKET_ID,
+                time_col=schema.WEEK,
+            )
+            candidates = model.recommend(users, k=args.k, exclude_seen=args.exclude_seen)
+            row = _evaluate("upcf", candidates, eval_frame, train, metric_features, eval_ks)
+            row.update(params)
+            tuning_rows.append(row)
+            candidate_run_list.append(candidates)
+
+        best_idx = _select_best(tuning_rows, primary_eval_k)
+        best_candidates = candidate_run_list[best_idx]
+        _write_candidates(best_candidates, "upcf", args.outputs_dir / "candidates_upcf.csv")
+        candidate_runs["upcf"] = best_candidates
+        comparison_rows.append({"model_name": "upcf", **tuning_rows[best_idx]})
+        pd.DataFrame(tuning_rows).to_csv(args.outputs_dir / "upcf_tuning_results.csv", index=False)
+        print(f"Wrote {args.outputs_dir / 'upcf_tuning_results.csv'} ({len(tuning_rows)} rows)")
+
     if "hybrid_strong" in models:
-        candidates = _rank_ensemble(
-            candidate_runs,
-            weights={"tifu_knn": 0.5, "personal_topfreq": 0.4, "itemknn": 0.1},
-            k=args.k,
-        )
+        if "upcf" in candidate_runs:
+            weights = {"tifu_knn": 0.55, "personal_topfreq": 0.35, "upcf": 0.05, "itemknn": 0.05}
+        else:
+            weights = {"tifu_knn": 0.5, "personal_topfreq": 0.4, "itemknn": 0.1}
+        candidates = _rank_ensemble(candidate_runs, weights=weights, k=args.k)
         _write_candidates(candidates, "hybrid_strong", args.outputs_dir / "candidates_hybrid_strong.csv")
         candidate_runs["hybrid_strong"] = candidates
         comparison_rows.append(

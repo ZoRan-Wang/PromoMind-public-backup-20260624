@@ -68,7 +68,7 @@ python scripts/prepare_dataset.py --raw-dir data/raw --processed-dir data/proces
 Run first-stage candidate generation models:
 
 ```bash
-python scripts/run_candidate_models.py --models popularity,personal_topfreq,category,itemknn,tifu_knn,hybrid_strong --k 50
+python scripts/run_candidate_models.py --models popularity,personal_topfreq,category,itemknn,tifu_knn,upcf,hybrid_strong --k 50
 ```
 
 Run all implemented Member B models, including ALS and BPR comparisons:
