@@ -83,6 +83,12 @@ Run the official Cornac TIFUKNN next-basket benchmark:
 python scripts/run_cornac_nbr_models.py --k 50 --tifuknn-grid 300:0.9:0.7:0.7:7
 ```
 
+Run the final protocol-best rank ensemble:
+
+```bash
+python scripts/run_sota_ensemble.py --weight-step 0.01 --primary-metric ndcg_at_10
+```
+
 For grocery next-basket prediction, repeat purchases are allowed by default. Use `--exclude-seen` only for a discovery-only experiment.
 
 Run tests:

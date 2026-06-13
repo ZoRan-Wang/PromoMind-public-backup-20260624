@@ -89,13 +89,32 @@ Run:
 python scripts/run_cornac_nbr_models.py --k 50 --tifuknn-grid 300:0.9:0.7:0.7:7
 ```
 
-### 8. UPCF-style Recency-aware User CF
+### 8. SOTA Ensemble Candidate Source
+
+Combines official Cornac TIFUKNN and the local strong hybrid by reciprocal-rank score:
+
+```text
+sota_score = w * (1 / Cornac_TIFUKNN_rank)
+           + (1 - w) * (1 / hybrid_strong_rank)
+```
+
+The validation search selects `w = 0.73` for the primary metric `NDCG@10`.
+
+Purpose: final best candidate source under the PromoMind time split and metric protocol. Cornac TIFUKNN gives stronger top-rank precision, while the local hybrid adds recall-oriented coverage from TIFU-KNN, personal frequency, UPCF-style user CF, and ItemKNN.
+
+Run:
+
+```powershell
+python scripts/run_sota_ensemble.py --weight-step 0.01 --primary-metric ndcg_at_10
+```
+
+### 9. UPCF-style Recency-aware User CF
 
 Builds user-wise popularity vectors from each household's recent baskets and aggregates them through asymmetric-cosine household similarity.
 
 Purpose: community-standard next-basket comparison model. On this split it improves over generic ItemKNN/ALS, but does not beat TIFU-KNN or the strong hybrid. Cornac's official UPCF currently hits a SciPy 1.13 sparse slicing incompatibility in this environment, so the repository uses a local equivalent implementation for UPCF-style comparison.
 
-### 9. Implicit ALS
+### 10. Implicit ALS
 
 Implements implicit-feedback Alternating Least Squares. The wrapper supports:
 
@@ -112,7 +131,7 @@ Default tuning grid:
 
 Purpose: matrix-factorization comparison model. On this split, ALS is useful for coverage and novelty but is not the strongest next-basket model.
 
-### 10. BPR Matrix Factorization
+### 11. BPR Matrix Factorization
 
 Implements a lightweight Bayesian Personalized Ranking SGD model with pairwise positive-vs-negative item sampling.
 
@@ -151,6 +170,12 @@ Run all B models including BPR:
 python scripts/run_candidate_models.py --models all --k 50
 ```
 
+Run the final SOTA-style rank ensemble after the base candidates and Cornac TIFUKNN have been generated:
+
+```powershell
+python scripts/run_sota_ensemble.py --weight-step 0.01 --primary-metric ndcg_at_10
+```
+
 The runner allows repeat purchases by default. This matches grocery basket prediction, where previously purchased staples are often the most realistic next-basket items. To run a discovery-only experiment that filters previously purchased products, add:
 
 ```powershell
@@ -179,12 +204,15 @@ Generated files are written under `outputs/`, which is intentionally ignored by 
 | `outputs/candidates_upcf.csv` | UPCF-style recency-aware user CF candidates |
 | `outputs/candidates_hybrid_strong.csv` | final strong hybrid candidate source |
 | `outputs/candidates_cornac_tifuknn.csv` | official Cornac TIFUKNN candidates |
+| `outputs/candidates_sota_ensemble.csv` | final protocol-best rank ensemble candidates |
 | `outputs/candidates_als.csv` | best ALS candidate output from tuning grid |
 | `outputs/candidates_bpr.csv` | best BPR candidate output when BPR is requested |
 | `outputs/tifu_tuning_results.csv` | TIFU-KNN parameter grid and validation metrics |
 | `outputs/upcf_tuning_results.csv` | UPCF parameter grid and validation metrics |
 | `outputs/cornac_tifuknn_tuning_results.csv` | official Cornac TIFUKNN parameters and validation metrics |
 | `outputs/cornac_model_comparison.csv` | official Cornac NBR comparison result |
+| `outputs/sota_ensemble_weight_search.csv` | Cornac/hybrid ensemble weight search results |
+| `outputs/sota_ensemble_model_comparison.csv` | final protocol-best ensemble result |
 | `outputs/als_tuning_results.csv` | ALS parameter grid and validation metrics |
 | `outputs/bpr_tuning_results.csv` | BPR parameter grid and validation metrics |
 | `outputs/model_comparison.csv` | final model comparison table |
@@ -207,18 +235,19 @@ Full run settings:
 | Personal Top Frequency | 0.0984 | 0.3790 | 0.1462 | 0.3402 |
 | UPCF-style | 0.0874 | 0.3278 | 0.1242 | 0.2831 |
 | TIFU-KNN style | 0.1011 | 0.3851 | 0.1503 | 0.3474 |
-| Strong Hybrid | **0.1029** | 0.3935 | **0.1511** | 0.3528 |
+| Strong Hybrid | 0.1029 | 0.3935 | **0.1511** | 0.3528 |
 | Official Cornac TIFUKNN | 0.1009 | **0.4210** | 0.1416 | **0.3574** |
+| SOTA Ensemble | **0.1051** | **0.4278** | 0.1492 | **0.3691** |
 | ALS | 0.0372 | 0.0743 | 0.0596 | 0.0788 |
 | BPR | 0.0046 | 0.0143 | 0.0066 | 0.0127 |
 
 Interpretation:
 
-- The strongest recall-oriented source is the local strong hybrid.
-- The strongest ranking-quality source is official Cornac TIFUKNN, with the best NDCG@10 and NDCG@20.
-- For downstream reranking, use `candidates_cornac_tifuknn.csv` when optimizing top-list ranking quality, or `candidates_hybrid_strong.csv` when optimizing recall coverage.
+- The strongest single-model ranking source is official Cornac TIFUKNN.
+- The strongest recall-oriented base source is the local strong hybrid.
+- The final best source under our validation protocol is `candidates_sota_ensemble.csv`, a rank ensemble of Cornac TIFUKNN and `hybrid_strong`.
+- For downstream reranking, use `candidates_sota_ensemble.csv` as the default final candidate source. Keep `candidates_cornac_tifuknn.csv` and `candidates_hybrid_strong.csv` as ablation sources.
 - ALS and BPR should be reported as matrix-factorization comparisons, not as the main result.
-- The project should use `candidates_hybrid_strong.csv` or `candidates_tifu_knn.csv` as Member B's handoff to promotion-aware reranking.
 
 ## Evaluation Metrics
 
@@ -244,7 +273,7 @@ Promotion-aware metrics such as Business Utility@K are owned by Member C after r
 | B6 ALS tuning | implemented through `--als-grid` and `als_tuning_results.csv` |
 | B7 BPR first run | implemented in `src/promomind/models/bpr.py` and CLI |
 | B8 BPR tuning | implemented through `--bpr-grid` and `bpr_tuning_results.csv` |
-| B9 model comparison table | implemented as `outputs/model_comparison.csv`, including strong next-basket baselines |
+| B9 model comparison table | implemented as `outputs/model_comparison.csv` and `outputs/sota_ensemble_model_comparison.csv`, including strong next-basket baselines |
 | B10 model PPT pages | drafted in `docs/member_b_slide_content.md` |
 | B11 model report section | this file can be used as the report section |
 
@@ -254,4 +283,4 @@ Member B should make three points:
 
 1. The candidate-generation stage optimizes purchase relevance before promotion logic is applied.
 2. Grocery next-basket prediction is repeat-heavy; filtering previously purchased products is the wrong main-task setup.
-3. The final strong candidate source is TIFU-KNN / hybrid next-basket modeling, while ALS/BPR are reported as comparison models.
+3. The final best candidate source is the Cornac TIFUKNN plus hybrid rank ensemble, while ALS/BPR are reported as comparison models.

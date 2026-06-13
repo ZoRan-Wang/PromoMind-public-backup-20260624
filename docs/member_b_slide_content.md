@@ -58,10 +58,11 @@
 - Metrics: Recall@10/20, NDCG@10/20, Coverage@20, Diversity@20, Novelty@20.
 - TIFU-KNN is the strongest single non-ensemble next-basket model.
 - Cornac's official TIFUKNN has the best NDCG@10 and NDCG@20.
-- The strong hybrid has the best Recall@10 and Recall@20.
-- Final handoff files: `candidates_cornac_tifuknn.csv` and `candidates_hybrid_strong.csv`.
+- The strong hybrid has the best Recall@20 and the broadest recall-oriented handoff.
+- The final protocol-best handoff is `candidates_sota_ensemble.csv`.
+- Ablation files: `candidates_cornac_tifuknn.csv` and `candidates_hybrid_strong.csv`.
 
-**Speaker note:** ALS and BPR remain useful comparison models, but they are not the final accuracy leaders on this grocery split. Promotion-aware business utility is evaluated after Member C's reranking stage.
+**Speaker note:** ALS and BPR remain useful comparison models, but they are not the final accuracy leaders on this grocery split. The final candidate source is a rank ensemble because Cornac TIFUKNN gives the best top-rank precision, while the local hybrid improves recall coverage. Promotion-aware business utility is evaluated after Member C's reranking stage.
 
 ## Slide 5: Current Result Table
 
@@ -76,6 +77,7 @@
 - UPCF-style: Recall@10 0.0874, NDCG@10 0.3278.
 - Strong Hybrid: Recall@10 0.1029, NDCG@10 0.3935.
 - Official Cornac TIFUKNN: Recall@10 0.1009, NDCG@10 0.4210.
+- Final SOTA Ensemble: Recall@10 0.1051, NDCG@10 0.4278.
 - Previous generic models are lower: ItemKNN NDCG@10 0.1980, ALS NDCG@10 0.0743.
 
-**Speaker note:** The key takeaway is methodological: on grocery data, the community-level answer is not "use a deeper model first"; it is "model repeat consumption and temporal frequency correctly."
+**Speaker note:** The key takeaway is methodological: on grocery data, the community-level answer is not "use a deeper model first"; it is "model repeat consumption and temporal frequency correctly." Our final result improves the strongest single-model NDCG@10 by ensembling its precise top ranks with the recall-oriented hybrid.

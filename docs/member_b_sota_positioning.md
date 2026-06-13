@@ -9,7 +9,9 @@ What we can claim defensibly:
 - The task is a grocery next-basket recommendation task.
 - In next-basket recommendation literature, strong conventional methods include TOP / personal frequency, TIFU-KNN, and recency-aware collaborative filtering.
 - On our time-based split, repeat-aware next-basket models strongly outperform generic ALS/BPR matrix factorization.
-- Member B's final candidate source should include `candidates_cornac_tifuknn.csv` for highest ranking quality and `candidates_hybrid_strong.csv` for highest recall.
+- Member B's strongest single-model source is `candidates_cornac_tifuknn.csv`.
+- Member B's strongest recall-oriented source is `candidates_hybrid_strong.csv`.
+- Member B's final protocol-best source is `candidates_sota_ensemble.csv`, a rank ensemble of Cornac TIFUKNN and `hybrid_strong`.
 
 ## Literature Basis
 
@@ -39,6 +41,12 @@ Official Cornac TIFUKNN run:
 python scripts/run_cornac_nbr_models.py --k 50 --tifuknn-grid 300:0.9:0.7:0.7:7
 ```
 
+Final ensemble run:
+
+```powershell
+python scripts/run_sota_ensemble.py --weight-step 0.01 --primary-metric ndcg_at_10
+```
+
 Environment used for the Cornac check:
 
 - `cornac==2.2.2`
@@ -54,16 +62,24 @@ Environment used for the Cornac check:
 | ItemKNN | 0.0399 | 0.1980 | 0.0591 | 0.1659 |
 | UPCF-style | 0.0874 | 0.3278 | 0.1242 | 0.2831 |
 | TIFU-KNN style | 0.1011 | 0.3851 | 0.1503 | 0.3474 |
-| Strong Hybrid | **0.1029** | 0.3935 | **0.1511** | 0.3528 |
+| Strong Hybrid | 0.1029 | 0.3935 | **0.1511** | 0.3528 |
 | Official Cornac TIFUKNN | 0.1009 | **0.4210** | 0.1416 | **0.3574** |
+| SOTA Ensemble | **0.1051** | **0.4278** | 0.1492 | **0.3691** |
 | ALS | 0.0372 | 0.0743 | 0.0596 | 0.0788 |
 | BPR | 0.0046 | 0.0143 | 0.0066 | 0.0127 |
+
+The selected ensemble weight is:
+
+```text
+0.73 * reciprocal-rank(Cornac TIFUKNN)
++ 0.27 * reciprocal-rank(hybrid_strong)
+```
 
 ## Recommended Presentation Claim
 
 Use this wording:
 
-> Because The Complete Journey does not have a single official leaderboard, we benchmark against community-standard next-basket methods. After correcting the grocery task setup to allow repeat purchases, repeat-aware models dominate generic matrix factorization. Our highest-NDCG source is Cornac's official TIFUKNN implementation, and our highest-recall source is a TIFU + personal-frequency + UPCF + ItemKNN hybrid.
+> Because The Complete Journey does not have a single official leaderboard, we benchmark against community-standard next-basket methods under one time-based validation protocol. After correcting the grocery task setup to allow repeat purchases, repeat-aware models dominate generic matrix factorization. Our best final candidate source is a rank ensemble of Cornac's official TIFUKNN and our recall-oriented hybrid, improving NDCG@10 from 0.4210 to 0.4278 under our protocol.
 
 Avoid this wording:
 
