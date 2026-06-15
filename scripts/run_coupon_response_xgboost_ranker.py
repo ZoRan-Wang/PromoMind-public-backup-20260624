@@ -76,9 +76,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-estimators", type=int, default=120)
     parser.add_argument("--learning-rate", type=float, default=0.03)
     parser.add_argument("--max-depth", type=int, default=2)
+    parser.add_argument("--objective", default="rank:ndcg", choices=["rank:ndcg", "rank:pairwise", "rank:map"])
+    parser.add_argument("--positive-train-events-only", action="store_true")
     parser.add_argument("--subsample", type=float, default=0.9)
     parser.add_argument("--colsample-bytree", type=float, default=0.9)
     parser.add_argument("--search", action="store_true", help="Tune XGBoost configs on validation before final test.")
+    parser.add_argument("--search-objectives", action="store_true", help="Also search rank:pairwise/rank:map objectives.")
     parser.add_argument("--primary-metric", default="recall_at_20")
     parser.add_argument("--selection-tolerance", type=float, default=0.001)
     parser.add_argument("--use-response-priors", action="store_true", help="Add train-period product/category response priors.")
@@ -287,43 +290,73 @@ def add_content_affinity_features(features: pd.DataFrame, sources: dict[str, pd.
     return out
 
 
-def _candidate_configs(args: argparse.Namespace) -> list[dict[str, float | int]]:
+def _candidate_configs(args: argparse.Namespace) -> list[dict[str, float | int | str | bool]]:
     if not args.search:
         return [
             {
                 "n_estimators": args.n_estimators,
                 "learning_rate": args.learning_rate,
                 "max_depth": args.max_depth,
+                "objective": args.objective,
+                "positive_train_events_only": args.positive_train_events_only,
                 "subsample": args.subsample,
                 "colsample_bytree": args.colsample_bytree,
             }
         ]
-    return [
+    configs = [
         {
             "n_estimators": n_estimators,
             "learning_rate": learning_rate,
             "max_depth": max_depth,
+            "objective": objective,
+            "positive_train_events_only": positive_only,
             "subsample": args.subsample,
             "colsample_bytree": args.colsample_bytree,
         }
-        for n_estimators, learning_rate, max_depth in [
-            (80, 0.08, 3),
-            (120, 0.03, 2),
-            (120, 0.03, 3),
-            (120, 0.05, 3),
-            (180, 0.03, 2),
-            (180, 0.05, 2),
-            (250, 0.015, 3),
-            (250, 0.03, 2),
-            (500, 0.03, 4),
+        for n_estimators, learning_rate, max_depth, objective, positive_only in [
+            (120, 0.03, 2, "rank:ndcg", False),
+            (180, 0.03, 2, "rank:ndcg", False),
+            (250, 0.03, 2, "rank:ndcg", False),
+            (120, 0.05, 3, "rank:ndcg", False),
+            (180, 0.05, 2, "rank:ndcg", False),
+            (250, 0.015, 3, "rank:ndcg", False),
         ]
     ]
+    if args.search_objectives:
+        configs.extend(
+            {
+                "n_estimators": n_estimators,
+                "learning_rate": learning_rate,
+                "max_depth": max_depth,
+                "objective": objective,
+                "positive_train_events_only": positive_only,
+                "subsample": args.subsample,
+                "colsample_bytree": args.colsample_bytree,
+            }
+            for n_estimators, learning_rate, max_depth, objective, positive_only in [
+                (180, 0.03, 2, "rank:pairwise", False),
+                (250, 0.03, 2, "rank:pairwise", False),
+                (180, 0.03, 2, "rank:map", False),
+                (250, 0.03, 2, "rank:map", False),
+                (180, 0.03, 2, "rank:ndcg", True),
+                (250, 0.03, 2, "rank:ndcg", True),
+                (180, 0.03, 2, "rank:pairwise", True),
+            ]
+        )
+    return configs
 
 
-def _fit_ranker(xgb, config: dict[str, float | int], device: str, seed: int, train_x, train_y, train_groups):
+def _xgb_eval_metric(objective: str) -> str:
+    if objective == "rank:map":
+        return "map@10"
+    return "ndcg@10"
+
+
+def _fit_ranker(xgb, config: dict[str, float | int | str | bool], device: str, seed: int, train_x, train_y, train_groups):
+    objective = str(config.get("objective", "rank:ndcg"))
     ranker = xgb.XGBRanker(
-        objective="rank:ndcg",
-        eval_metric="ndcg@10",
+        objective=objective,
+        eval_metric=_xgb_eval_metric(objective),
         n_estimators=int(config["n_estimators"]),
         learning_rate=float(config["learning_rate"]),
         max_depth=int(config["max_depth"]),
@@ -341,7 +374,7 @@ def _fit_ranker(xgb, config: dict[str, float | int], device: str, seed: int, tra
 
 def _evaluate_config(
     xgb,
-    config: dict[str, float | int],
+    config: dict[str, float | int | str | bool],
     device: str,
     seed: int,
     train_x,
@@ -360,6 +393,17 @@ def _evaluate_config(
     row.update(config)
     row.update(base.evaluate_ranked(val_ranked, val_truth, val_events, eval_ks))
     return ranker, row
+
+
+def _filter_positive_event_groups(frame: pd.DataFrame, enabled: bool) -> pd.DataFrame:
+    if not enabled:
+        return frame
+    positive_events = frame.groupby(base.EVENT_COL)["label"].sum()
+    keep_events = set(positive_events[positive_events > 0].index)
+    filtered = frame[frame[base.EVENT_COL].isin(keep_events)].copy()
+    if filtered.empty:
+        return frame
+    return filtered
 
 
 def main() -> int:
@@ -398,7 +442,6 @@ def main() -> int:
     if train.empty or validation.empty or test.empty:
         raise RuntimeError("Train/validation/test features are required.")
 
-    train_x, train_y, train_groups, train_ordered = _grouped_xy(train, feature_columns)
     val_x, val_y, val_groups, val_ordered = _grouped_xy(validation, feature_columns)
     test_x, test_y, test_groups, test_ordered = _grouped_xy(test, feature_columns)
 
@@ -410,6 +453,8 @@ def main() -> int:
     search_rows = []
     configs = _candidate_configs(args)
     for config in configs:
+        config_train = _filter_positive_event_groups(train, bool(config.get("positive_train_events_only", False)))
+        train_x, train_y, train_groups, _ = _grouped_xy(config_train, feature_columns)
         _, row = _evaluate_config(
             xgb,
             config,
@@ -441,13 +486,24 @@ def main() -> int:
     best_row = eligible.iloc[0].to_dict()
     best_config = {
         key: best_row[key]
-        for key in ["n_estimators", "learning_rate", "max_depth", "subsample", "colsample_bytree"]
+        for key in [
+            "n_estimators",
+            "learning_rate",
+            "max_depth",
+            "objective",
+            "positive_train_events_only",
+            "subsample",
+            "colsample_bytree",
+        ]
     }
+    best_train = _filter_positive_event_groups(train, bool(best_config.get("positive_train_events_only", False)))
+    train_x, train_y, train_groups, _ = _grouped_xy(best_train, feature_columns)
     best_ranker = _fit_ranker(xgb, best_config, device, args.seed, train_x, train_y, train_groups)
     val_scores = best_ranker.predict(val_x)
     val_ranked = _rank_scores(val_ordered, val_scores, max_k)
 
     final_train = pd.concat([train, validation], ignore_index=True)
+    final_train = _filter_positive_event_groups(final_train, bool(best_config.get("positive_train_events_only", False)))
     final_train_x, final_train_y, final_train_groups, _ = _grouped_xy(final_train, feature_columns)
     final_ranker = _fit_ranker(xgb, best_config, device, args.seed, final_train_x, final_train_y, final_train_groups)
     test_scores = final_ranker.predict(test_x)

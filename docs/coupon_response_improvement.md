@@ -128,6 +128,14 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 
 They include repeat-by-cadence, base-by-repeat, interval-error, and per-event percentile ranks. They also showed validation gains but weaker held-out NDCG@10, so they remain optional rather than default.
 
+Alternative XGBoost ranking objectives can be searched with:
+
+```bash
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-objectives
+```
+
+This compares `rank:ndcg`, `rank:pairwise`, `rank:map`, and positive-event-only training on validation. In the current held-out run, the alternative objectives did not beat the default `rank:ndcg` configuration on test NDCG@10.
+
 ## Candidate-Pool Ceiling
 
 The held-out test candidate pool is not the main bottleneck:
