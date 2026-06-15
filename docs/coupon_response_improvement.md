@@ -19,6 +19,18 @@ Script:
 python scripts/run_coupon_response_ranker.py --device auto --primary-metric ndcg_at_10
 ```
 
+Supervised GPU learning-to-rank variant:
+
+```bash
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto
+```
+
+PyTorch pairwise neural variant:
+
+```bash
+python scripts/run_coupon_response_neural_ranker.py --reuse-features --device auto
+```
+
 Fast rerun after features are generated:
 
 ```bash
@@ -38,7 +50,9 @@ Weights are searched on validation campaigns only, then fixed for test campaigns
 
 ## GPU
 
-The local machine has an NVIDIA RTX GPU and PyTorch CUDA is available. The runner uses CUDA for vectorized score calculation when `--device auto` resolves to `cuda`.
+The local machine has an NVIDIA RTX GPU and PyTorch CUDA is available. The heuristic runner uses CUDA for vectorized score calculation when `--device auto` resolves to `cuda`.
+
+The PyTorch pairwise ranker trains on CUDA. The XGBoost ranker uses `device=cuda` and `tree_method=hist` when CUDA is available.
 
 Feature engineering and event-level ranking still use pandas on CPU because cuDF/CuPy are not installed locally.
 
@@ -52,11 +66,12 @@ Generated output:
 - `outputs/reranked_recommendations.csv`
 - `outputs/coupon_response_weight_search.csv`
 - `outputs/coupon_response_model_comparison.csv`
+- `outputs/coupon_response_final_model_comparison.csv`
 
 Validation has 1,523 household-campaign events and 697 positive events.
 Test has 715 household-campaign events and 109 positive events.
 
-Test comparison:
+Test comparison after the first heuristic upgrade:
 
 | Model | Recall@10 | NDCG@10 | Positive Event Hit@10 | All Event Hit@10 |
 | --- | ---: | ---: | ---: | ---: |
@@ -65,12 +80,19 @@ Test comparison:
 | Coupon repeat-cadence | 0.4005 | 0.2979 | 0.5046 | 0.0769 |
 | Coupon-response ranker | 0.3945 | 0.3145 | 0.5046 | 0.0769 |
 
+Additional supervised model exploration:
+
+| Model | Device | Recall@10 | NDCG@10 | Positive Event Hit@10 | All Event Hit@10 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| PyTorch pairwise neural ranker | CUDA | 0.3983 | 0.3132 | 0.4954 | 0.0755 |
+| XGBoost ranker, conservative depth-2 | CUDA | 0.4146 | 0.3223 | 0.5321 | 0.0811 |
+
 The main gain is against the previous SOTA-candidate-only coupon baseline:
 
 ```text
-Positive Event Hit@10: 19.27% -> 50.46%
-NDCG@10:               0.1489 -> 0.3145
-Recall@10:             0.1570 -> 0.3945
+Positive Event Hit@10: 19.27% -> 53.21%
+NDCG@10:               0.1489 -> 0.3223
+Recall@10:             0.1570 -> 0.4146
 ```
 
 ## External Research Positioning
@@ -84,5 +106,5 @@ The change is aligned with recent next-basket findings:
 Recommended wording:
 
 ```text
-We do not claim a universal new SOTA. Under our Complete Journey coupon-response protocol, the upgraded time-aware coupon-response ranker substantially improves coupon-specific hit rate over the SOTA-candidate-only coupon baseline.
+We do not claim a universal new SOTA. Under our Complete Journey coupon-response protocol, the upgraded time-aware and supervised coupon-response rankers substantially improve coupon-specific hit rate over the SOTA-candidate-only coupon baseline.
 ```

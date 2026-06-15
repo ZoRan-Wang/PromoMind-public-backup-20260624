@@ -9,3 +9,6 @@ implicit>=0.7
 
 # Optional community next-basket benchmark implementation.
 cornac==2.2.2
+
+# Optional GPU-capable learning-to-rank backend for coupon response ranking.
+xgboost>=3.2
