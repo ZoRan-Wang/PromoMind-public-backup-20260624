@@ -104,7 +104,7 @@ python scripts/run_coupon_response_ranker.py --device auto --primary-metric ndcg
 Run the supervised XGBoost learning-to-rank coupon-response model with CUDA when available:
 
 ```bash
-python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --primary-metric recall_at_20
 ```
 
 Run the PyTorch pairwise neural ranker:
@@ -146,8 +146,8 @@ success = the exposed household bought the ranked campaign coupon product within
 Current held-out test result:
 
 - `Positive Event Hit@10`: 53.21% vs. 19.27% for the SOTA-candidate-only coupon baseline
-- `NDCG@10`: 0.3223 vs. 0.1489
-- `Recall@10`: 0.4146 vs. 0.1570
+- `NDCG@10`: 0.3241 vs. 0.1489
+- `Recall@10`: 0.4128 vs. 0.1570
 
 Details are in `docs/coupon_response_improvement.md`.
 

@@ -22,7 +22,7 @@ python scripts/run_coupon_response_ranker.py --device auto --primary-metric ndcg
 Supervised GPU learning-to-rank variant:
 
 ```bash
-python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --primary-metric recall_at_20
 ```
 
 PyTorch pairwise neural variant:
@@ -67,6 +67,7 @@ Generated output:
 - `outputs/coupon_response_weight_search.csv`
 - `outputs/coupon_response_model_comparison.csv`
 - `outputs/coupon_response_final_model_comparison.csv`
+- `outputs/coupon_response_xgboost_search.csv`
 
 Validation has 1,523 household-campaign events and 697 positive events.
 Test has 715 household-campaign events and 109 positive events.
@@ -85,15 +86,23 @@ Additional supervised model exploration:
 | Model | Device | Recall@10 | NDCG@10 | Positive Event Hit@10 | All Event Hit@10 |
 | --- | --- | ---: | ---: | ---: | ---: |
 | PyTorch pairwise neural ranker | CUDA | 0.3983 | 0.3132 | 0.4954 | 0.0755 |
-| XGBoost ranker, conservative depth-2 | CUDA | 0.4146 | 0.3223 | 0.5321 | 0.0811 |
+| XGBoost ranker, validation-selected | CUDA | 0.4128 | 0.3241 | 0.5321 | 0.0811 |
 
 The main gain is against the previous SOTA-candidate-only coupon baseline:
 
 ```text
 Positive Event Hit@10: 19.27% -> 53.21%
-NDCG@10:               0.1489 -> 0.3223
-Recall@10:             0.1570 -> 0.4146
+NDCG@10:               0.1489 -> 0.3241
+Recall@10:             0.1570 -> 0.4128
 ```
+
+The XGBoost configuration above is selected only from validation campaigns using:
+
+```bash
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --primary-metric recall_at_20
+```
+
+The selected configuration is then retrained on train plus validation events before test scoring.
 
 ## External Research Positioning
 
