@@ -120,6 +120,25 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 
 These features use department, brand, product category, and product type affinity. They improved validation in one run but reduced held-out NDCG@10, so they are kept as an optional exploration rather than the default final model.
 
+Event-relative rank and interaction features are available through:
+
+```bash
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --use-derived-features
+```
+
+They include repeat-by-cadence, base-by-repeat, interval-error, and per-event percentile ranks. They also showed validation gains but weaker held-out NDCG@10, so they remain optional rather than default.
+
+## Candidate-Pool Ceiling
+
+The held-out test candidate pool is not the main bottleneck:
+
+```text
+test truth-item coverage in generated candidate pool: 99.56%
+test positive-event any coverage:                 100.00%
+```
+
+This means almost every purchased coupon product is already available to the ranker. Further improvement mainly depends on better cross-campaign ranking generalization, not simply adding more candidates.
+
 ## External Research Positioning
 
 The change is aligned with recent next-basket findings:

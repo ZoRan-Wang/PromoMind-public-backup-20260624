@@ -26,6 +26,22 @@ import run_coupon_response_ranker as base  # noqa: E402
 from promomind.data import schema  # noqa: E402
 
 MODEL_NAME = "coupon_response_xgboost_ranker"
+XGB_DERIVED_FEATURES = [
+    "repeat_cadence_signal",
+    "base_repeat_signal",
+    "base_cadence_signal",
+    "global_repeat_signal",
+    "category_repeat_signal",
+    "interval_ratio_log",
+    "interval_abs_log_error",
+    "days_since_last_missing",
+    "median_interval_missing",
+    "base_signal_pct_rank",
+    "repeat_signal_pct_rank",
+    "cadence_signal_pct_rank",
+    "global_signal_pct_rank",
+    "discount_signal_pct_rank",
+]
 XGB_EXTRA_FEATURES = [
     "product_response_prior",
     "category_response_prior",
@@ -67,12 +83,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--selection-tolerance", type=float, default=0.001)
     parser.add_argument("--use-response-priors", action="store_true", help="Add train-period product/category response priors.")
     parser.add_argument("--use-content-features", action="store_true", help="Add product metadata affinity features.")
+    parser.add_argument("--use-derived-features", action="store_true", help="Add event-relative rank and interaction features.")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
 
-def _feature_columns(use_response_priors: bool = False, use_content_features: bool = False) -> list[str]:
+def _feature_columns(
+    use_response_priors: bool = False,
+    use_content_features: bool = False,
+    use_derived_features: bool = False,
+) -> list[str]:
     columns = list(neural.FEATURE_COLUMNS)
+    if use_derived_features:
+        columns.extend(XGB_DERIVED_FEATURES)
     if use_response_priors:
         columns.extend(XGB_EXTRA_FEATURES)
     if use_content_features:
@@ -107,6 +130,50 @@ def _xgb_device(requested: str) -> str:
         return "cuda" if torch.cuda.is_available() else "cpu"
     except Exception:
         return "cpu"
+
+
+def add_xgb_derived_features(features: pd.DataFrame) -> pd.DataFrame:
+    out = features.copy()
+    for column in [
+        "base_signal",
+        "repeat_signal",
+        "cadence_signal",
+        "category_signal",
+        "global_signal",
+        "discount_signal",
+        "days_since_last",
+        "median_interval_days",
+    ]:
+        out[column] = pd.to_numeric(out[column], errors="coerce").replace([np.inf, -np.inf], np.nan)
+
+    out["days_since_last_missing"] = out["days_since_last"].isna().astype(float)
+    out["median_interval_missing"] = out["median_interval_days"].isna().astype(float)
+    days = out["days_since_last"].fillna(365.0).clip(lower=0.0)
+    interval = out["median_interval_days"].fillna(365.0).clip(lower=0.0)
+    out["interval_ratio_log"] = np.log1p(days) - np.log1p(interval)
+    out["interval_abs_log_error"] = out["interval_ratio_log"].abs()
+
+    for column in ["base_signal", "repeat_signal", "cadence_signal", "category_signal", "global_signal", "discount_signal"]:
+        out[column] = out[column].fillna(0.0)
+
+    out["repeat_cadence_signal"] = out["repeat_signal"] * out["cadence_signal"]
+    out["base_repeat_signal"] = out["base_signal"] * out["repeat_signal"]
+    out["base_cadence_signal"] = out["base_signal"] * out["cadence_signal"]
+    out["global_repeat_signal"] = out["global_signal"] * out["repeat_signal"]
+    out["category_repeat_signal"] = out["category_signal"] * out["repeat_signal"]
+
+    for source, target in [
+        ("base_signal", "base_signal_pct_rank"),
+        ("repeat_signal", "repeat_signal_pct_rank"),
+        ("cadence_signal", "cadence_signal_pct_rank"),
+        ("global_signal", "global_signal_pct_rank"),
+        ("discount_signal", "discount_signal_pct_rank"),
+    ]:
+        out[target] = out.groupby(base.EVENT_COL)[source].rank(method="average", pct=True)
+
+    for column in XGB_DERIVED_FEATURES:
+        out[column] = pd.to_numeric(out[column], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return out
 
 
 def _smoothed_prior(
@@ -313,11 +380,17 @@ def main() -> int:
     events = neural.make_all_events(sources)
     features, truth = neural.load_or_build_features(args, sources, events)
     features = neural.attach_labels(neural.add_model_features(features), truth)
+    if args.use_derived_features:
+        features = add_xgb_derived_features(features)
     if args.use_response_priors:
         features = add_xgb_response_prior_features(features)
     if args.use_content_features:
         features = add_content_affinity_features(features, sources)
-    feature_columns = _feature_columns(args.use_response_priors, args.use_content_features)
+    feature_columns = _feature_columns(
+        args.use_response_priors,
+        args.use_content_features,
+        args.use_derived_features,
+    )
 
     train = features[features["split"] == "train"].reset_index(drop=True)
     validation = features[features["split"] == "validation"].reset_index(drop=True)

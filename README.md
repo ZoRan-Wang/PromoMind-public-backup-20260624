@@ -151,6 +151,8 @@ Current held-out test result:
 
 Details are in `docs/coupon_response_improvement.md`.
 
+Optional exploratory switches `--use-content-features`, `--use-response-priors`, and `--use-derived-features` are available for ablation, but the default XGBoost command above is the current held-out best.
+
 The original Complete Journey raw files are committed under `data/raw/completejourney/` because each file is below GitHub's 100MB limit in RDS/RDA format. Generated CSV exports and processed outputs remain ignored by Git.
 
 ## Included Raw Data
