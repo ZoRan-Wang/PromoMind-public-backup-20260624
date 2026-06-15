@@ -89,6 +89,12 @@ Run the final protocol-best rank ensemble:
 python scripts/run_sota_ensemble.py --weight-step 0.01 --primary-metric ndcg_at_10
 ```
 
+Build the coupon timing demo artifacts with external TBP/TARS next-basket code:
+
+```bash
+python scripts/build_coupon_timing_demo.py --demo-events 3 --prediction-length 5 --max-label-rows 5000
+```
+
 For grocery next-basket prediction, repeat purchases are allowed by default. Use `--exclude-seen` only for a discovery-only experiment.
 
 Run tests:
@@ -102,6 +108,8 @@ Run the demo:
 ```bash
 streamlit run app/streamlit_app.py
 ```
+
+If `outputs/demo_time_name_recommendations.csv` exists, the Streamlit page shows the coupon timing demo: historical basket input on the left and predicted time-product pairs on the right.
 
 The original Complete Journey raw files are committed under `data/raw/completejourney/` because each file is below GitHub's 100MB limit in RDS/RDA format. Generated CSV exports and processed outputs remain ignored by Git.
 

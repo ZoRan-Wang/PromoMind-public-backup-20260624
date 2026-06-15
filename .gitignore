@@ -24,6 +24,7 @@ models_artifacts/
 *.parquet
 *.feather
 tmp_*.tar.gz
+external/
 
 # OS/editor
 .DS_Store
