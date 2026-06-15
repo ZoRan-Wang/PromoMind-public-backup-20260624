@@ -46,6 +46,20 @@ def load_demo_recommendations() -> pd.DataFrame:
     return pd.DataFrame()
 
 
+def load_coupon_timing_recommendations() -> pd.DataFrame:
+    for filename in ["reranked_recommendations.csv", "demo_time_name_recommendations.csv"]:
+        data = load_csv(OUTPUTS / filename)
+        if data.empty:
+            continue
+        if "final_rank" in data.columns and "rank" not in data.columns:
+            data["rank"] = data["final_rank"]
+        if "model_name" in data.columns and "source_model" not in data.columns:
+            data["source_model"] = data["model_name"]
+        if "coupon_start_date" in data.columns and "campaign_id" in data.columns:
+            return data
+    return pd.DataFrame()
+
+
 def render_coupon_timing_demo(
     recommendations: pd.DataFrame,
     history_input: pd.DataFrame,
@@ -122,6 +136,7 @@ def render_coupon_timing_demo(
                 "product_id",
                 "product_name",
                 "coupon_recommended",
+                "recommend_coupon",
                 "coupon_eligible",
                 "success_within_5d_observed",
                 "observed_purchase_time",
@@ -144,7 +159,7 @@ def main() -> None:
 
     household_features = load_csv(PROCESSED / "household_features.csv")
     product_features = load_csv(PROCESSED / "product_features.csv")
-    timing_recommendations = load_csv(OUTPUTS / "demo_time_name_recommendations.csv")
+    timing_recommendations = load_coupon_timing_recommendations()
     timing_history = load_csv(OUTPUTS / "demo_history_input.csv")
 
     if not timing_recommendations.empty:

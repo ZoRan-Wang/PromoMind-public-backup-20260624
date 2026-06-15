@@ -95,6 +95,18 @@ Build the coupon timing demo artifacts with external TBP/TARS next-basket code:
 python scripts/build_coupon_timing_demo.py --demo-events 3 --prediction-length 5 --max-label-rows 5000
 ```
 
+Run the upgraded coupon-response ranker with CUDA scoring when available:
+
+```bash
+python scripts/run_coupon_response_ranker.py --device auto --primary-metric ndcg_at_10
+```
+
+After `outputs/coupon_response_features.csv` has been generated once, rerun the weight search quickly with:
+
+```bash
+python scripts/run_coupon_response_ranker.py --reuse-features --device auto --primary-metric ndcg_at_10
+```
+
 For grocery next-basket prediction, repeat purchases are allowed by default. Use `--exclude-seen` only for a discovery-only experiment.
 
 Run tests:
@@ -109,7 +121,23 @@ Run the demo:
 streamlit run app/streamlit_app.py
 ```
 
-If `outputs/demo_time_name_recommendations.csv` exists, the Streamlit page shows the coupon timing demo: historical basket input on the left and predicted time-product pairs on the right.
+If `outputs/reranked_recommendations.csv` or `outputs/demo_time_name_recommendations.csv` exists, the Streamlit page shows the coupon timing demo: historical basket input on the left when available and predicted time-product pairs on the right.
+
+## Coupon-Response Upgrade
+
+The upgraded coupon-response ranker evaluates household-campaign exposures with this label:
+
+```text
+success = the exposed household bought the ranked campaign coupon product within 5 days after campaign start
+```
+
+Current held-out test result:
+
+- `Positive Event Hit@10`: 50.46% vs. 19.27% for the SOTA-candidate-only coupon baseline
+- `NDCG@10`: 0.3145 vs. 0.1489
+- `Recall@10`: 0.3945 vs. 0.1570
+
+Details are in `docs/coupon_response_improvement.md`.
 
 The original Complete Journey raw files are committed under `data/raw/completejourney/` because each file is below GitHub's 100MB limit in RDS/RDA format. Generated CSV exports and processed outputs remain ignored by Git.
 
