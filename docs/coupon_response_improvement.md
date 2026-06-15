@@ -86,17 +86,17 @@ Additional supervised model exploration:
 | Model | Device | Recall@10 | NDCG@10 | Positive Event Hit@10 | All Event Hit@10 |
 | --- | --- | ---: | ---: | ---: | ---: |
 | PyTorch pairwise neural ranker | CUDA | 0.3983 | 0.3132 | 0.4954 | 0.0755 |
-| XGBoost ranker, validation-selected | CUDA | 0.4105 | 0.3248 | 0.5321 | 0.0811 |
+| XGBoost ranker, validation-selected | CUDA | 0.4105 | 0.3255 | 0.5321 | 0.0811 |
 
 The main gain is against the previous SOTA-candidate-only coupon baseline:
 
 ```text
 Positive Event Hit@10: 19.27% -> 53.21%
-NDCG@10:               0.1489 -> 0.3248
+NDCG@10:               0.1489 -> 0.3255
 Recall@10:             0.1570 -> 0.4105
 ```
 
-The XGBoost configuration above is selected only from validation campaigns using:
+The XGBoost configuration above is selected only from validation campaigns using a conservative tolerance rule: choose the simplest configuration within `0.001` of the best validation primary metric.
 
 ```bash
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --primary-metric recall_at_20
@@ -111,6 +111,14 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 ```
 
 It is not the default because validation-selected response priors were less stable under the held-out campaign split.
+
+Content-affinity features inspired by product text/multimodal recommendation are also available:
+
+```bash
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --use-content-features
+```
+
+These features use department, brand, product category, and product type affinity. They improved validation in one run but reduced held-out NDCG@10, so they are kept as an optional exploration rather than the default final model.
 
 ## External Research Positioning
 

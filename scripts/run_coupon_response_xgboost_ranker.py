@@ -34,6 +34,13 @@ XGB_EXTRA_FEATURES = [
     "category_positive_count_log",
     "campaign_type_positive_count_log",
 ]
+XGB_CONTENT_FEATURES = [
+    "department_affinity",
+    "brand_affinity",
+    "category_affinity_exact",
+    "product_type_affinity",
+    "content_match_signal",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,19 +64,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--colsample-bytree", type=float, default=0.9)
     parser.add_argument("--search", action="store_true", help="Tune XGBoost configs on validation before final test.")
     parser.add_argument("--primary-metric", default="recall_at_20")
+    parser.add_argument("--selection-tolerance", type=float, default=0.001)
     parser.add_argument("--use-response-priors", action="store_true", help="Add train-period product/category response priors.")
+    parser.add_argument("--use-content-features", action="store_true", help="Add product metadata affinity features.")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
 
-def _feature_columns() -> list[str]:
-    return neural.FEATURE_COLUMNS + XGB_EXTRA_FEATURES
+def _feature_columns(use_response_priors: bool = False, use_content_features: bool = False) -> list[str]:
+    columns = list(neural.FEATURE_COLUMNS)
+    if use_response_priors:
+        columns.extend(XGB_EXTRA_FEATURES)
+    if use_content_features:
+        columns.extend(XGB_CONTENT_FEATURES)
+    return columns
 
 
-def _grouped_xy(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, list[int], pd.DataFrame]:
+def _grouped_xy(frame: pd.DataFrame, feature_columns: list[str]) -> tuple[pd.DataFrame, pd.Series, list[int], pd.DataFrame]:
     ordered = frame.sort_values([base.EVENT_COL, schema.PRODUCT_ID]).reset_index(drop=True)
     groups = ordered.groupby(base.EVENT_COL, sort=False).size().astype(int).tolist()
-    x = ordered[_feature_columns()]
+    x = ordered[feature_columns]
     y = ordered["label"].astype(float)
     return x, y, groups, ordered
 
@@ -131,10 +145,78 @@ def add_xgb_response_prior_features(features: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def add_zero_response_prior_features(features: pd.DataFrame) -> pd.DataFrame:
+def _clean_text_column(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame.columns:
+        return pd.Series("UNKNOWN", index=frame.index)
+    return frame[column].fillna("UNKNOWN").astype(str).str.strip().replace("", "UNKNOWN")
+
+
+def add_content_affinity_features(features: pd.DataFrame, sources: dict[str, pd.DataFrame]) -> pd.DataFrame:
     out = features.copy()
-    for column in XGB_EXTRA_FEATURES:
-        out[column] = 0.0
+    products = sources["products"][
+        [schema.PRODUCT_ID, "department", "brand", "product_category", "product_type"]
+    ].drop_duplicates(schema.PRODUCT_ID).copy()
+    for column in ["department", "brand", "product_category", "product_type"]:
+        products[column] = _clean_text_column(products, column)
+
+    candidate_meta = products.rename(
+        columns={
+            "department": "candidate_department",
+            "brand": "candidate_brand",
+            "product_category": "candidate_product_category",
+            "product_type": "candidate_product_type",
+        }
+    )
+    out = out.merge(candidate_meta, on=schema.PRODUCT_ID, how="left")
+    for column in ["candidate_department", "candidate_brand", "candidate_product_category", "candidate_product_type"]:
+        out[column] = _clean_text_column(out, column)
+
+    transactions = sources["transactions"][[schema.HOUSEHOLD_ID, schema.PRODUCT_ID, "transaction_timestamp"]].copy()
+    transactions = transactions.merge(products, on=schema.PRODUCT_ID, how="left")
+    for column in ["department", "brand", "product_category", "product_type"]:
+        transactions[column] = _clean_text_column(transactions, column)
+
+    for feature in XGB_CONTENT_FEATURES:
+        out[feature] = 0.0
+
+    for campaign_id, index in out.groupby("campaign_id", sort=True).groups.items():
+        group = out.loc[index]
+        start = pd.Timestamp(group["coupon_start_date"].iloc[0])
+        households = set(group[schema.HOUSEHOLD_ID].astype(int))
+        history = transactions[
+            transactions[schema.HOUSEHOLD_ID].astype(int).isin(households)
+            & (transactions["transaction_timestamp"] < start)
+        ].copy()
+        if history.empty:
+            continue
+
+        totals = history.groupby(schema.HOUSEHOLD_ID).size().to_dict()
+        counts = {
+            "department_affinity": history.groupby([schema.HOUSEHOLD_ID, "department"]).size().to_dict(),
+            "brand_affinity": history.groupby([schema.HOUSEHOLD_ID, "brand"]).size().to_dict(),
+            "category_affinity_exact": history.groupby([schema.HOUSEHOLD_ID, "product_category"]).size().to_dict(),
+            "product_type_affinity": history.groupby([schema.HOUSEHOLD_ID, "product_type"]).size().to_dict(),
+        }
+        key_columns = {
+            "department_affinity": "candidate_department",
+            "brand_affinity": "candidate_brand",
+            "category_affinity_exact": "candidate_product_category",
+            "product_type_affinity": "candidate_product_type",
+        }
+        household_values = group[schema.HOUSEHOLD_ID].astype(int).to_numpy()
+        for feature, count_map in counts.items():
+            attr_values = group[key_columns[feature]].astype(str).to_numpy()
+            values = [
+                float(count_map.get((int(household), str(attr)), 0)) / float(max(1, totals.get(int(household), 0)))
+                for household, attr in zip(household_values, attr_values, strict=False)
+            ]
+            out.loc[index, feature] = values
+
+    out["content_match_signal"] = out[
+        ["department_affinity", "brand_affinity", "category_affinity_exact", "product_type_affinity"]
+    ].max(axis=1)
+    for feature in XGB_CONTENT_FEATURES:
+        out[feature] = pd.to_numeric(out[feature], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
     return out
 
 
@@ -233,8 +315,9 @@ def main() -> int:
     features = neural.attach_labels(neural.add_model_features(features), truth)
     if args.use_response_priors:
         features = add_xgb_response_prior_features(features)
-    else:
-        features = add_zero_response_prior_features(features)
+    if args.use_content_features:
+        features = add_content_affinity_features(features, sources)
+    feature_columns = _feature_columns(args.use_response_priors, args.use_content_features)
 
     train = features[features["split"] == "train"].reset_index(drop=True)
     validation = features[features["split"] == "validation"].reset_index(drop=True)
@@ -242,9 +325,9 @@ def main() -> int:
     if train.empty or validation.empty or test.empty:
         raise RuntimeError("Train/validation/test features are required.")
 
-    train_x, train_y, train_groups, train_ordered = _grouped_xy(train)
-    val_x, val_y, val_groups, val_ordered = _grouped_xy(validation)
-    test_x, test_y, test_groups, test_ordered = _grouped_xy(test)
+    train_x, train_y, train_groups, train_ordered = _grouped_xy(train, feature_columns)
+    val_x, val_y, val_groups, val_ordered = _grouped_xy(validation, feature_columns)
+    test_x, test_y, test_groups, test_ordered = _grouped_xy(test, feature_columns)
 
     val_events = events[events["split"] == "validation"].copy()
     test_events = events[events["split"] == "test"].copy()
@@ -252,11 +335,9 @@ def main() -> int:
     test_truth = truth[truth[base.EVENT_COL].isin(set(test_events[base.EVENT_COL]))].copy()
 
     search_rows = []
-    best_row = None
-    best_ranker = None
     configs = _candidate_configs(args)
     for config in configs:
-        ranker, row = _evaluate_config(
+        _, row = _evaluate_config(
             xgb,
             config,
             device,
@@ -271,36 +352,30 @@ def main() -> int:
             eval_ks,
         )
         search_rows.append(row)
-        if best_row is None:
-            best_row = row
-            best_ranker = ranker
-            continue
-        best_key = (
-            float(best_row.get(args.primary_metric, 0.0)),
-            float(best_row.get("positive_event_hit_rate_at_10", 0.0)),
-            float(best_row.get("recall_at_10", 0.0)),
-        )
-        row_key = (
-            float(row.get(args.primary_metric, 0.0)),
-            float(row.get("positive_event_hit_rate_at_10", 0.0)),
-            float(row.get("recall_at_10", 0.0)),
-        )
-        if row_key > best_key:
-            best_row = row
-            best_ranker = ranker
 
-    if best_row is None or best_ranker is None:
+    if not search_rows:
         raise RuntimeError("No XGBoost configs were trained.")
 
+    search_frame = pd.DataFrame(search_rows)
+    best_primary = float(search_frame[args.primary_metric].max())
+    eligible = search_frame[
+        search_frame[args.primary_metric] >= best_primary - max(0.0, args.selection_tolerance)
+    ].copy()
+    eligible = eligible.sort_values(
+        ["max_depth", "n_estimators", "learning_rate", args.primary_metric, "ndcg_at_10"],
+        ascending=[True, True, True, False, False],
+    )
+    best_row = eligible.iloc[0].to_dict()
     best_config = {
         key: best_row[key]
         for key in ["n_estimators", "learning_rate", "max_depth", "subsample", "colsample_bytree"]
     }
+    best_ranker = _fit_ranker(xgb, best_config, device, args.seed, train_x, train_y, train_groups)
     val_scores = best_ranker.predict(val_x)
     val_ranked = _rank_scores(val_ordered, val_scores, max_k)
 
     final_train = pd.concat([train, validation], ignore_index=True)
-    final_train_x, final_train_y, final_train_groups, _ = _grouped_xy(final_train)
+    final_train_x, final_train_y, final_train_groups, _ = _grouped_xy(final_train, feature_columns)
     final_ranker = _fit_ranker(xgb, best_config, device, args.seed, final_train_x, final_train_y, final_train_groups)
     test_scores = final_ranker.predict(test_x)
     test_ranked = _rank_scores(test_ordered, test_scores, max_k)
@@ -317,6 +392,7 @@ def main() -> int:
             "model_selection": "validation" if args.search else "fixed",
             "trained_on": trained_on,
             "primary_metric": args.primary_metric,
+            "selection_tolerance": args.selection_tolerance if args.search else 0.0,
         }
         row.update(best_config)
         row.update(base.evaluate_ranked(ranked, split_truth, split_events, eval_ks))
@@ -347,7 +423,7 @@ def main() -> int:
 
     importance = pd.DataFrame(
         {
-            "feature": _feature_columns(),
+            "feature": feature_columns,
             "importance": final_ranker.feature_importances_,
         }
     ).sort_values("importance", ascending=False)

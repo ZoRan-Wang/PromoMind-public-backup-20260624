@@ -146,7 +146,7 @@ success = the exposed household bought the ranked campaign coupon product within
 Current held-out test result:
 
 - `Positive Event Hit@10`: 53.21% vs. 19.27% for the SOTA-candidate-only coupon baseline
-- `NDCG@10`: 0.3248 vs. 0.1489
+- `NDCG@10`: 0.3255 vs. 0.1489
 - `Recall@10`: 0.4105 vs. 0.1570
 
 Details are in `docs/coupon_response_improvement.md`.
