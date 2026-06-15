@@ -26,6 +26,14 @@ import run_coupon_response_ranker as base  # noqa: E402
 from promomind.data import schema  # noqa: E402
 
 MODEL_NAME = "coupon_response_xgboost_ranker"
+XGB_EXTRA_FEATURES = [
+    "product_response_prior",
+    "category_response_prior",
+    "campaign_type_response_prior",
+    "product_positive_count_log",
+    "category_positive_count_log",
+    "campaign_type_positive_count_log",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,14 +57,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--colsample-bytree", type=float, default=0.9)
     parser.add_argument("--search", action="store_true", help="Tune XGBoost configs on validation before final test.")
     parser.add_argument("--primary-metric", default="recall_at_20")
+    parser.add_argument("--use-response-priors", action="store_true", help="Add train-period product/category response priors.")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
+
+
+def _feature_columns() -> list[str]:
+    return neural.FEATURE_COLUMNS + XGB_EXTRA_FEATURES
 
 
 def _grouped_xy(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, list[int], pd.DataFrame]:
     ordered = frame.sort_values([base.EVENT_COL, schema.PRODUCT_ID]).reset_index(drop=True)
     groups = ordered.groupby(base.EVENT_COL, sort=False).size().astype(int).tolist()
-    x = ordered[neural.FEATURE_COLUMNS]
+    x = ordered[_feature_columns()]
     y = ordered["label"].astype(float)
     return x, y, groups, ordered
 
@@ -80,6 +93,49 @@ def _xgb_device(requested: str) -> str:
         return "cuda" if torch.cuda.is_available() else "cpu"
     except Exception:
         return "cpu"
+
+
+def _smoothed_prior(
+    frame: pd.DataFrame,
+    group_cols: list[str],
+    global_rate: float,
+    smoothing: float,
+) -> pd.DataFrame:
+    stats = frame.groupby(group_cols)["label"].agg(["sum", "count"]).reset_index()
+    stats["prior"] = (stats["sum"] + global_rate * smoothing) / (stats["count"] + smoothing)
+    stats["positive_count_log"] = np.log1p(stats["sum"])
+    return stats
+
+
+def add_xgb_response_prior_features(features: pd.DataFrame) -> pd.DataFrame:
+    out = features.copy()
+    train = out[out["split"] == "train"].copy()
+    global_rate = float(train["label"].mean()) if not train.empty else float(out["label"].mean())
+    if not np.isfinite(global_rate):
+        global_rate = 0.0
+
+    mappings = [
+        (["product_id"], "product_response_prior", "product_positive_count_log", 30.0),
+        (["product_category"], "category_response_prior", "category_positive_count_log", 50.0),
+        (["campaign_type"], "campaign_type_response_prior", "campaign_type_positive_count_log", 100.0),
+    ]
+    for group_cols, prior_col, count_col, smoothing in mappings:
+        stats = _smoothed_prior(train, group_cols, global_rate, smoothing)
+        stats = stats.rename(columns={"prior": prior_col, "positive_count_log": count_col})
+        out = out.merge(stats[group_cols + [prior_col, count_col]], on=group_cols, how="left")
+        out[prior_col] = out[prior_col].fillna(global_rate)
+        out[count_col] = out[count_col].fillna(0.0)
+
+    for column in XGB_EXTRA_FEATURES:
+        out[column] = pd.to_numeric(out[column], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return out
+
+
+def add_zero_response_prior_features(features: pd.DataFrame) -> pd.DataFrame:
+    out = features.copy()
+    for column in XGB_EXTRA_FEATURES:
+        out[column] = 0.0
+    return out
 
 
 def _candidate_configs(args: argparse.Namespace) -> list[dict[str, float | int]]:
@@ -175,6 +231,10 @@ def main() -> int:
     events = neural.make_all_events(sources)
     features, truth = neural.load_or_build_features(args, sources, events)
     features = neural.attach_labels(neural.add_model_features(features), truth)
+    if args.use_response_priors:
+        features = add_xgb_response_prior_features(features)
+    else:
+        features = add_zero_response_prior_features(features)
 
     train = features[features["split"] == "train"].reset_index(drop=True)
     validation = features[features["split"] == "validation"].reset_index(drop=True)
@@ -287,7 +347,7 @@ def main() -> int:
 
     importance = pd.DataFrame(
         {
-            "feature": neural.FEATURE_COLUMNS,
+            "feature": _feature_columns(),
             "importance": final_ranker.feature_importances_,
         }
     ).sort_values("importance", ascending=False)

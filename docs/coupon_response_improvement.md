@@ -86,14 +86,14 @@ Additional supervised model exploration:
 | Model | Device | Recall@10 | NDCG@10 | Positive Event Hit@10 | All Event Hit@10 |
 | --- | --- | ---: | ---: | ---: | ---: |
 | PyTorch pairwise neural ranker | CUDA | 0.3983 | 0.3132 | 0.4954 | 0.0755 |
-| XGBoost ranker, validation-selected | CUDA | 0.4128 | 0.3241 | 0.5321 | 0.0811 |
+| XGBoost ranker, validation-selected | CUDA | 0.4105 | 0.3248 | 0.5321 | 0.0811 |
 
 The main gain is against the previous SOTA-candidate-only coupon baseline:
 
 ```text
 Positive Event Hit@10: 19.27% -> 53.21%
-NDCG@10:               0.1489 -> 0.3241
-Recall@10:             0.1570 -> 0.4128
+NDCG@10:               0.1489 -> 0.3248
+Recall@10:             0.1570 -> 0.4105
 ```
 
 The XGBoost configuration above is selected only from validation campaigns using:
@@ -103,6 +103,14 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 ```
 
 The selected configuration is then retrained on train plus validation events before test scoring.
+
+An optional historical response-prior feature set is available through:
+
+```bash
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --use-response-priors
+```
+
+It is not the default because validation-selected response priors were less stable under the held-out campaign split.
 
 ## External Research Positioning
 
