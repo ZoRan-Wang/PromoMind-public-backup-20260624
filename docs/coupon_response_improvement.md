@@ -136,6 +136,23 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 
 This compares `rank:ndcg`, `rank:pairwise`, `rank:map`, and positive-event-only training on validation. In the current held-out run, the alternative objectives did not beat the default `rank:ndcg` configuration on test NDCG@10.
 
+A pointwise XGBoost classifier was also checked as a negative ablation. The best validation classifier used binary logistic response prediction and sorted candidate products by predicted probability, but its held-out test NDCG@10 stayed below the ranking model. We therefore keep XGBoost learning-to-rank as the final model family.
+
+## Search Summary
+
+| Direction | Status | Held-out conclusion |
+| --- | --- | --- |
+| Candidate-pool expansion | Diagnosed | Test candidate pool already covers 99.56% of truth items |
+| Heuristic time-aware ranker | Kept as strong interpretable baseline | Strong and stable, but below XGBoost on NDCG@10 |
+| PyTorch pairwise neural ranker | Implemented | Competitive, but below XGBoost on held-out NDCG@10 |
+| XGBoost learning-to-rank | Final default | Best held-out NDCG@10 and Positive Event Hit@10 |
+| XGBoost objective search | Optional ablation | `rank:pairwise` and `rank:map` did not improve held-out NDCG@10 |
+| Pointwise XGBoost classifier | Negative ablation | Validation looked strong, held-out test was weaker |
+| Response-prior features | Optional ablation | Less stable across campaign split |
+| Product-content affinity features | Optional ablation | Useful research direction, not final default |
+| Event-relative interaction features | Optional ablation | Validation gains did not transfer to held-out NDCG@10 |
+| RedNote/NoteLLM-style multimodal | Future work | Data lacks product images, notes, reviews, and social content |
+
 ## Candidate-Pool Ceiling
 
 The held-out test candidate pool is not the main bottleneck:
