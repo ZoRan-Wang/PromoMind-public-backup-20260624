@@ -127,6 +127,7 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-score-blend --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --wide-search --use-value-features --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --use-coupon-family-features --primary-metric recall_at_20
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --use-redemption-features --primary-metric recall_at_20
 ```
 
 `--wide-search` expands the XGBoost grid. Under the current validation rule it still selects the same held-out best default configuration. `--search-score-blend` tunes a validation-selected blend between XGBoost scores and the repeat-cadence heuristic. It improved validation Recall@20, but reduced held-out NDCG@10, so it is not the final model.
@@ -139,9 +140,12 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 | Wide search only | 0.4105 | 0.3255 | 0.5321 | 0.5058 | 0.3541 |
 | Wide search + value features | 0.4135 | 0.3251 | 0.5321 | 0.5058 | 0.3526 |
 | Coupon-family features | 0.4002 | 0.3183 | 0.4954 | 0.4968 | 0.3472 |
+| Redemption features | 0.4105 | 0.3255 | 0.5321 | 0.5058 | 0.3539 |
 | Validation score blend | 0.3945 | 0.3079 | 0.5046 | 0.5155 | 0.3442 |
 
 `--use-coupon-family-features` treats all products attached to the same campaign coupon UPC as a coupon family and measures household history with that family before the campaign starts. The features were non-zero and used by XGBoost, but they did not generalize to the held-out campaigns.
+
+`--use-redemption-features` adds prior coupon redemption count, prior same-coupon-UPC redemption, and prior product/category redemption signals. The features are leakage-safe because only redemption dates before the campaign start are used. They were too sparse to improve held-out NDCG@10.
 
 An optional historical response-prior feature set is available through:
 
@@ -189,8 +193,10 @@ A pointwise XGBoost classifier was also checked as a negative ablation. The best
 | XGBoost objective search | Optional ablation | `rank:pairwise` and `rank:map` did not improve held-out NDCG@10 |
 | XGBoost plus value features | Optional ablation | Slight Recall@10 gain, slightly worse held-out NDCG@10 |
 | XGBoost plus coupon-family features | Optional ablation | Used by the model, but lower held-out NDCG@10 |
+| XGBoost plus redemption features | Optional ablation | Leakage-safe but too sparse to move the main metric |
 | XGBoost plus heuristic score blend | Negative ablation | Validation improved but held-out test worsened |
 | Campaign-type expert models | Negative ablation | Improved Recall@20 slightly, but hurt NDCG@10 |
+| Type-A filtering and Type-B validation | Negative ablation | Did not beat the default held-out NDCG@10 or Hit@10 |
 | LightGBM LambdaRank | Negative ablation | Best checked variant reached about 0.3225 held-out NDCG@10, below XGBoost |
 | Pointwise XGBoost classifier | Negative ablation | Validation looked strong, held-out test was weaker |
 | Response-prior features | Optional ablation | Less stable across campaign split |
@@ -220,6 +226,8 @@ The change is aligned with recent next-basket findings:
 - A recent empirical NBR study reports that conventional methods such as TOP, UP-CF@r, and TIFUKNN remain very strong on Instacart and Dunnhumby-style datasets: <https://arxiv.org/html/2312.02550v1>
 - NoteLLM and NoteLLM-2 show that LLM/multimodal representations are promising for content-rich note recommendation, but Complete Journey lacks product images, reviews, and social notes. RedNote-style multimodal work is therefore future work for cold-start or similar-product retrieval after adding product text/image data: <https://arxiv.org/html/2403.01744v1> and <https://arxiv.org/html/2405.16789v2>
 - Modern coupon optimization literature frames coupons and discounts as uplift/treatment problems under cost constraints. Our data does not include randomized control groups, so we use response ranking rather than claiming causal uplift: <https://arxiv.org/html/2402.03379v1>
+- Newer coupon/incentive work explicitly optimizes expected revenue gain minus coupon cost under budget constraints; this is directionally aligned with our Business Utility proxy, but requires treatment-control or debiased uplift labels that Complete Journey does not provide: <https://arxiv.org/html/2602.12972v1> and <https://dl.acm.org/doi/10.1145/3640457.3688147>
+- Recent grocery basket-generation work such as T-REX frames grocery prediction as category-sequence generation. That is a possible final-project extension, but our current coupon-response task is a campaign-aware ranking problem rather than full basket generation: <https://arxiv.org/html/2603.06631v1>
 
 Recommended wording:
 

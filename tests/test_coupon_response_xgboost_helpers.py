@@ -85,3 +85,45 @@ def test_coupon_family_features_use_prior_same_coupon_upc_history():
     assert math.isclose(out.loc[0, "coupon_family_count_log"], math.log1p(1.0))
     assert math.isclose(out.loc[0, "coupon_family_substitute_signal"], math.log1p(1.0))
     assert out.loc[1, "coupon_family_substitute_signal"] == 0.0
+
+
+def test_redemption_features_ignore_future_redemptions(tmp_path):
+    features = pd.DataFrame(
+        {
+            "campaign_id": [2],
+            "coupon_start_date": ["2026-01-10"],
+            "household_id": [7],
+            "product_id": [200],
+            "product_category": ["SOUP"],
+        }
+    )
+    raw_dir = tmp_path
+    pd.DataFrame(
+        {
+            "household_id": [7, 7],
+            "coupon_upc": [3000, 3000],
+            "campaign_id": [1, 2],
+            "redemption_date": ["2026-01-01", "2026-01-12"],
+        }
+    ).to_csv(raw_dir / "coupon_redemptions.csv", index=False)
+    sources = {
+        "coupons": pd.DataFrame(
+            {
+                "campaign_id": [1, 2],
+                "coupon_upc": [3000, 3000],
+                "product_id": [200, 200],
+            }
+        ),
+        "products": pd.DataFrame(
+            {
+                "product_id": [200],
+                "product_category": ["SOUP"],
+            }
+        ),
+    }
+
+    out = xgbr.add_redemption_features(features, sources, raw_dir)
+
+    assert math.isclose(out.loc[0, "household_redemption_count_log"], math.log1p(1.0))
+    assert math.isclose(out.loc[0, "household_coupon_upc_redemption_log"], math.log1p(1.0))
+    assert math.isclose(out.loc[0, "household_product_redemption_log"], math.log1p(1.0))

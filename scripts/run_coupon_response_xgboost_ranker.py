@@ -88,6 +88,16 @@ XGB_COUPON_FAMILY_FEATURES = [
     "coupon_family_substitute_signal",
     "product_coupon_upc_count_log",
 ]
+XGB_REDEMPTION_FEATURES = [
+    "household_redemption_count_log",
+    "household_coupon_upc_redemption_log",
+    "household_product_redemption_log",
+    "household_category_redemption_log",
+    "product_redemption_signal",
+    "category_redemption_signal",
+    "coupon_upc_redemption_signal",
+    "household_redemption_match_signal",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -123,6 +133,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use-derived-features", action="store_true", help="Add event-relative rank and interaction features.")
     parser.add_argument("--use-value-features", action="store_true", help="Add historical price, spend, and discount-sensitivity features.")
     parser.add_argument("--use-coupon-family-features", action="store_true", help="Add campaign coupon-UPC family repeat features.")
+    parser.add_argument("--use-redemption-features", action="store_true", help="Add historical coupon redemption propensity features.")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -133,6 +144,7 @@ def _feature_columns(
     use_derived_features: bool = False,
     use_value_features: bool = False,
     use_coupon_family_features: bool = False,
+    use_redemption_features: bool = False,
 ) -> list[str]:
     columns = list(neural.FEATURE_COLUMNS)
     if use_derived_features:
@@ -141,6 +153,8 @@ def _feature_columns(
         columns.extend(XGB_VALUE_FEATURES)
     if use_coupon_family_features:
         columns.extend(XGB_COUPON_FAMILY_FEATURES)
+    if use_redemption_features:
+        columns.extend(XGB_REDEMPTION_FEATURES)
     if use_response_priors:
         columns.extend(XGB_EXTRA_FEATURES)
     if use_content_features:
@@ -632,6 +646,116 @@ def add_coupon_family_features(features: pd.DataFrame, sources: dict[str, pd.Dat
     return out
 
 
+def add_redemption_features(features: pd.DataFrame, sources: dict[str, pd.DataFrame], raw_dir: Path) -> pd.DataFrame:
+    """Add historical coupon-redemption propensity features.
+
+    Only redemptions before the current campaign start are used. The current
+    campaign's future redemption outcomes are not used for ranking.
+    """
+
+    out = features.copy()
+    redemptions_path = raw_dir / "coupon_redemptions.csv"
+    for feature in XGB_REDEMPTION_FEATURES:
+        out[feature] = 0.0
+    if not redemptions_path.exists():
+        return out
+
+    redemptions = pd.read_csv(redemptions_path, parse_dates=["redemption_date"])
+    if redemptions.empty:
+        return out
+    redemptions = base._normalize_ids(redemptions, [schema.HOUSEHOLD_ID, "campaign_id", "coupon_upc"])
+
+    coupons = sources["coupons"][["campaign_id", "coupon_upc", schema.PRODUCT_ID]].drop_duplicates().copy()
+    products = sources["products"][[schema.PRODUCT_ID, "product_category"]].drop_duplicates(schema.PRODUCT_ID).copy()
+    products["product_category"] = products["product_category"].fillna("UNKNOWN").astype(str)
+    coupon_products = coupons.merge(products, on=schema.PRODUCT_ID, how="left")
+
+    redeemed_products = redemptions.merge(coupon_products, on=["campaign_id", "coupon_upc"], how="left")
+    redeemed_products["product_category"] = redeemed_products["product_category"].fillna("UNKNOWN").astype(str)
+
+    for campaign_id, index in out.groupby("campaign_id", sort=True).groups.items():
+        group = out.loc[index]
+        start = pd.Timestamp(group["coupon_start_date"].iloc[0])
+        history = redemptions[redemptions["redemption_date"] < start].copy()
+        product_history = redeemed_products[redeemed_products["redemption_date"] < start].copy()
+        if history.empty and product_history.empty:
+            continue
+
+        campaign_coupons = coupons[coupons["campaign_id"] == int(campaign_id)].copy()
+        if campaign_coupons.empty:
+            continue
+        candidate_coupon_counts = campaign_coupons.groupby(schema.PRODUCT_ID)["coupon_upc"].nunique()
+        candidate_coupon_lists = campaign_coupons.groupby(schema.PRODUCT_ID)["coupon_upc"].apply(lambda values: set(map(int, values)))
+
+        household_redemptions = history.groupby(schema.HOUSEHOLD_ID).size()
+        household_coupon_redemptions = history.groupby([schema.HOUSEHOLD_ID, "coupon_upc"]).size()
+        coupon_upc_redemptions = history.groupby("coupon_upc").size()
+        max_coupon_upc = float(np.log1p(coupon_upc_redemptions.max())) if not coupon_upc_redemptions.empty else 1.0
+        max_coupon_upc = max(max_coupon_upc, 1.0)
+
+        if product_history.empty:
+            household_product_redemptions = pd.Series(dtype=float)
+            household_category_redemptions = pd.Series(dtype=float)
+            product_redemptions = pd.Series(dtype=float)
+            category_redemptions = pd.Series(dtype=float)
+        else:
+            household_product_redemptions = product_history.groupby([schema.HOUSEHOLD_ID, schema.PRODUCT_ID]).size()
+            household_category_redemptions = product_history.groupby([schema.HOUSEHOLD_ID, "product_category"]).size()
+            product_redemptions = product_history.groupby(schema.PRODUCT_ID).size()
+            category_redemptions = product_history.groupby("product_category").size()
+
+        max_product = float(np.log1p(product_redemptions.max())) if not product_redemptions.empty else 1.0
+        max_category = float(np.log1p(category_redemptions.max())) if not category_redemptions.empty else 1.0
+        max_product = max(max_product, 1.0)
+        max_category = max(max_category, 1.0)
+
+        row_values: list[dict[str, float | int]] = []
+        for row in group[[schema.HOUSEHOLD_ID, schema.PRODUCT_ID, "product_category"]].itertuples(index=False):
+            household_id = int(getattr(row, schema.HOUSEHOLD_ID))
+            product_id = int(getattr(row, schema.PRODUCT_ID))
+            category = str(getattr(row, "product_category"))
+            coupon_upcs = candidate_coupon_lists.get(product_id, set())
+            household_coupon_count = sum(
+                float(household_coupon_redemptions.get((household_id, coupon_upc), 0.0))
+                for coupon_upc in coupon_upcs
+            )
+            coupon_upc_count = sum(float(coupon_upc_redemptions.get(coupon_upc, 0.0)) for coupon_upc in coupon_upcs)
+            row_values.append(
+                {
+                    schema.HOUSEHOLD_ID: household_id,
+                    schema.PRODUCT_ID: product_id,
+                    "household_redemption_count_log": math.log1p(float(household_redemptions.get(household_id, 0.0))),
+                    "household_coupon_upc_redemption_log": math.log1p(household_coupon_count),
+                    "household_product_redemption_log": math.log1p(
+                        float(household_product_redemptions.get((household_id, product_id), 0.0))
+                    ),
+                    "household_category_redemption_log": math.log1p(
+                        float(household_category_redemptions.get((household_id, category), 0.0))
+                    ),
+                    "product_redemption_signal": math.log1p(float(product_redemptions.get(product_id, 0.0))) / max_product,
+                    "category_redemption_signal": math.log1p(float(category_redemptions.get(category, 0.0))) / max_category,
+                    "coupon_upc_redemption_signal": math.log1p(coupon_upc_count) / max_coupon_upc,
+                    "household_redemption_match_signal": float(household_coupon_count > 0.0)
+                    * math.log1p(float(candidate_coupon_counts.get(product_id, 0.0))),
+                }
+            )
+
+        redemption_features = pd.DataFrame(row_values)
+        if redemption_features.empty:
+            continue
+        update = group[[schema.HOUSEHOLD_ID, schema.PRODUCT_ID]].merge(
+            redemption_features,
+            on=[schema.HOUSEHOLD_ID, schema.PRODUCT_ID],
+            how="left",
+        )
+        for feature in XGB_REDEMPTION_FEATURES:
+            out.loc[index, feature] = update[feature].fillna(0.0).to_numpy(dtype=float)
+
+    for feature in XGB_REDEMPTION_FEATURES:
+        out[feature] = pd.to_numeric(out[feature], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return out
+
+
 def _candidate_configs(args: argparse.Namespace) -> list[dict[str, float | int | str | bool]]:
     if not args.search:
         return [
@@ -810,6 +934,8 @@ def main() -> int:
         features = add_value_features(features, sources)
     if args.use_coupon_family_features:
         features = add_coupon_family_features(features, sources)
+    if args.use_redemption_features:
+        features = add_redemption_features(features, sources, args.raw_dir)
     if args.use_response_priors:
         features = add_xgb_response_prior_features(features)
     if args.use_content_features:
@@ -820,6 +946,7 @@ def main() -> int:
         args.use_derived_features,
         args.use_value_features,
         args.use_coupon_family_features,
+        args.use_redemption_features,
     )
 
     train = features[features["split"] == "train"].reset_index(drop=True)
