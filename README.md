@@ -107,6 +107,14 @@ Run the supervised XGBoost learning-to-rank coupon-response model with CUDA when
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --primary-metric recall_at_20
 ```
 
+Run optional robustness diagnostics and ablations:
+
+```bash
+python scripts/analyze_coupon_response_drift.py
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --wide-search --use-value-features --primary-metric recall_at_20
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-score-blend --primary-metric recall_at_20
+```
+
 Run the PyTorch pairwise neural ranker:
 
 ```bash
@@ -151,7 +159,7 @@ Current held-out test result:
 
 Details are in `docs/coupon_response_improvement.md`.
 
-Optional exploratory switches `--use-content-features`, `--use-response-priors`, and `--use-derived-features` are available for ablation, but the default XGBoost command above is the current held-out best.
+Optional exploratory switches `--wide-search`, `--search-score-blend`, `--use-value-features`, `--use-content-features`, `--use-response-priors`, and `--use-derived-features` are available for ablation, but the default XGBoost command above is the current held-out best.
 
 The original Complete Journey raw files are committed under `data/raw/completejourney/` because each file is below GitHub's 100MB limit in RDS/RDA format. Generated CSV exports and processed outputs remain ignored by Git.
 

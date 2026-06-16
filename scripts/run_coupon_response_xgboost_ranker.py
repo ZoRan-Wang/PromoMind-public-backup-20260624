@@ -8,6 +8,7 @@ XGBoost is optional and can use CUDA when available.
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 
@@ -26,6 +27,12 @@ import run_coupon_response_ranker as base  # noqa: E402
 from promomind.data import schema  # noqa: E402
 
 MODEL_NAME = "coupon_response_xgboost_ranker"
+HEURISTIC_BLEND_WEIGHTS = {
+    "repeat_signal": 0.45,
+    "cadence_signal": 0.25,
+    "category_signal": 0.20,
+    "global_signal": 0.10,
+}
 XGB_DERIVED_FEATURES = [
     "repeat_cadence_signal",
     "base_repeat_signal",
@@ -57,6 +64,21 @@ XGB_CONTENT_FEATURES = [
     "product_type_affinity",
     "content_match_signal",
 ]
+XGB_VALUE_FEATURES = [
+    "product_spend_signal",
+    "product_avg_sales_log",
+    "product_quantity_log",
+    "product_discount_rate",
+    "product_coupon_discount_rate",
+    "household_avg_sales_log",
+    "household_discount_rate",
+    "household_coupon_discount_rate",
+    "household_history_depth_log",
+    "household_value_match_signal",
+    "household_discount_match_signal",
+    "household_coupon_product_signal",
+    "campaign_duration_days_log",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -81,12 +103,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--subsample", type=float, default=0.9)
     parser.add_argument("--colsample-bytree", type=float, default=0.9)
     parser.add_argument("--search", action="store_true", help="Tune XGBoost configs on validation before final test.")
+    parser.add_argument("--wide-search", action="store_true", help="Search a wider XGBoost grid on validation.")
     parser.add_argument("--search-objectives", action="store_true", help="Also search rank:pairwise/rank:map objectives.")
+    parser.add_argument("--search-score-blend", action="store_true", help="Tune a validation-selected blend of XGBoost and repeat-cadence scores.")
+    parser.add_argument("--blend-step", type=float, default=0.05, help="Grid step for --search-score-blend.")
     parser.add_argument("--primary-metric", default="recall_at_20")
     parser.add_argument("--selection-tolerance", type=float, default=0.001)
     parser.add_argument("--use-response-priors", action="store_true", help="Add train-period product/category response priors.")
     parser.add_argument("--use-content-features", action="store_true", help="Add product metadata affinity features.")
     parser.add_argument("--use-derived-features", action="store_true", help="Add event-relative rank and interaction features.")
+    parser.add_argument("--use-value-features", action="store_true", help="Add historical price, spend, and discount-sensitivity features.")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -95,10 +121,13 @@ def _feature_columns(
     use_response_priors: bool = False,
     use_content_features: bool = False,
     use_derived_features: bool = False,
+    use_value_features: bool = False,
 ) -> list[str]:
     columns = list(neural.FEATURE_COLUMNS)
     if use_derived_features:
         columns.extend(XGB_DERIVED_FEATURES)
+    if use_value_features:
+        columns.extend(XGB_VALUE_FEATURES)
     if use_response_priors:
         columns.extend(XGB_EXTRA_FEATURES)
     if use_content_features:
@@ -120,6 +149,70 @@ def _rank_scores(frame: pd.DataFrame, scores, k: int) -> pd.DataFrame:
     ranked = ranked.sort_values([base.EVENT_COL, "final_score", schema.PRODUCT_ID], ascending=[True, False, True])
     ranked["rank"] = ranked.groupby(base.EVENT_COL).cumcount() + 1
     return ranked[ranked["rank"] <= k].copy()
+
+
+def _normalize_scores_by_event(frame: pd.DataFrame, scores) -> np.ndarray:
+    scored = frame[[base.EVENT_COL]].copy()
+    scored["_score"] = np.asarray(scores, dtype=np.float32)
+    grouped = scored.groupby(base.EVENT_COL)["_score"]
+    min_score = grouped.transform("min")
+    max_score = grouped.transform("max")
+    denom = (max_score - min_score).replace(0.0, 1.0)
+    return ((scored["_score"] - min_score) / denom).to_numpy(dtype=np.float32)
+
+
+def _heuristic_scores(frame: pd.DataFrame, device: str) -> np.ndarray:
+    return base.compute_weighted_score(frame, HEURISTIC_BLEND_WEIGHTS, device=device)
+
+
+def _blend_scores(
+    frame: pd.DataFrame,
+    xgb_scores,
+    heuristic_scores,
+    xgb_blend_weight: float,
+) -> np.ndarray:
+    xgb_normalized = _normalize_scores_by_event(frame, xgb_scores)
+    heuristic_normalized = _normalize_scores_by_event(frame, heuristic_scores)
+    weight = float(np.clip(xgb_blend_weight, 0.0, 1.0))
+    return (weight * xgb_normalized) + ((1.0 - weight) * heuristic_normalized)
+
+
+def _candidate_blend_weights(enabled: bool, step: float) -> list[float]:
+    if not enabled:
+        return [1.0]
+    step = float(step)
+    if step <= 0.0 or step > 1.0:
+        raise ValueError("--blend-step must be in the interval (0, 1].")
+    weights = np.arange(0.0, 1.0 + step / 2.0, step)
+    return [float(np.clip(round(weight, 6), 0.0, 1.0)) for weight in weights]
+
+
+def _select_blend_weight(
+    frame: pd.DataFrame,
+    xgb_scores,
+    heuristic_scores,
+    val_events: pd.DataFrame,
+    val_truth: pd.DataFrame,
+    eval_ks: list[int],
+    primary_metric: str,
+    blend_weights: list[float],
+) -> tuple[float, dict[str, float]]:
+    best_weight = 1.0
+    best_metrics: dict[str, float] | None = None
+    for weight in blend_weights:
+        blended = _blend_scores(frame, xgb_scores, heuristic_scores, weight)
+        ranked = _rank_scores(frame, blended, max(eval_ks))
+        metrics = base.evaluate_ranked(ranked, val_truth, val_events, eval_ks)
+        metric_value = float(metrics.get(primary_metric, 0.0))
+        best_value = float(best_metrics.get(primary_metric, 0.0)) if best_metrics else -np.inf
+        if (metric_value > best_value) or (
+            math.isclose(metric_value, best_value, abs_tol=1e-12) and weight > best_weight
+        ):
+            best_weight = weight
+            best_metrics = metrics
+    if best_metrics is None:
+        best_metrics = {}
+    return best_weight, best_metrics
 
 
 def _xgb_device(requested: str) -> str:
@@ -290,6 +383,142 @@ def add_content_affinity_features(features: pd.DataFrame, sources: dict[str, pd.
     return out
 
 
+def add_value_features(features: pd.DataFrame, sources: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Add historical value and discount-sensitivity signals.
+
+    Features are recomputed at each campaign start from prior transactions only.
+    They are optional because the held-out campaign split can drift sharply.
+    """
+
+    out = features.copy()
+    transactions = sources["transactions"][
+        [
+            schema.HOUSEHOLD_ID,
+            schema.PRODUCT_ID,
+            schema.BASKET_ID,
+            schema.SALES_VALUE,
+            schema.QUANTITY,
+            schema.RETAIL_DISC,
+            schema.COUPON_DISC,
+            schema.COUPON_MATCH_DISC,
+            "transaction_timestamp",
+        ]
+    ].copy()
+    for column in [
+        schema.SALES_VALUE,
+        schema.QUANTITY,
+        schema.RETAIL_DISC,
+        schema.COUPON_DISC,
+        schema.COUPON_MATCH_DISC,
+    ]:
+        transactions[column] = pd.to_numeric(transactions[column], errors="coerce").fillna(0.0).clip(lower=0.0)
+    transactions["discount_value"] = (
+        transactions[schema.RETAIL_DISC] + transactions[schema.COUPON_DISC] + transactions[schema.COUPON_MATCH_DISC]
+    )
+    transactions["coupon_discount_value"] = transactions[schema.COUPON_DISC] + transactions[schema.COUPON_MATCH_DISC]
+    transactions["gross_value_proxy"] = transactions[schema.SALES_VALUE] + transactions["discount_value"]
+
+    campaign_dates = sources["campaigns"][["campaign_id", "start_date", "end_date"]].drop_duplicates("campaign_id")
+    campaign_dates = campaign_dates.set_index("campaign_id")
+
+    for feature in XGB_VALUE_FEATURES:
+        out[feature] = 0.0
+
+    for campaign_id, index in out.groupby("campaign_id", sort=True).groups.items():
+        group = out.loc[index]
+        start = pd.Timestamp(group["coupon_start_date"].iloc[0])
+        history = transactions[transactions["transaction_timestamp"] < start].copy()
+        if history.empty:
+            continue
+
+        product_stats = history.groupby(schema.PRODUCT_ID).agg(
+            total_sales=(schema.SALES_VALUE, "sum"),
+            mean_sales=(schema.SALES_VALUE, "mean"),
+            mean_quantity=(schema.QUANTITY, "mean"),
+            total_discount=("discount_value", "sum"),
+            total_coupon_discount=("coupon_discount_value", "sum"),
+            gross_value=("gross_value_proxy", "sum"),
+        )
+        max_spend = float(np.log1p(product_stats["total_sales"].max())) if product_stats["total_sales"].max() > 0 else 1.0
+        product_stats["product_spend_signal"] = np.log1p(product_stats["total_sales"]) / max_spend
+        product_stats["product_avg_sales_log"] = np.log1p(product_stats["mean_sales"].clip(lower=0.0))
+        product_stats["product_quantity_log"] = np.log1p(product_stats["mean_quantity"].clip(lower=0.0))
+        denominator = product_stats["gross_value"].clip(lower=1e-6)
+        product_stats["product_discount_rate"] = (product_stats["total_discount"] / denominator).clip(lower=0.0, upper=1.0)
+        product_stats["product_coupon_discount_rate"] = (
+            product_stats["total_coupon_discount"] / denominator
+        ).clip(lower=0.0, upper=1.0)
+
+        households = set(group[schema.HOUSEHOLD_ID].astype(int))
+        household_history = history[history[schema.HOUSEHOLD_ID].astype(int).isin(households)].copy()
+        if household_history.empty:
+            household_stats = pd.DataFrame()
+        else:
+            household_stats = household_history.groupby(schema.HOUSEHOLD_ID).agg(
+                mean_sales=(schema.SALES_VALUE, "mean"),
+                total_discount=("discount_value", "sum"),
+                total_coupon_discount=("coupon_discount_value", "sum"),
+                gross_value=("gross_value_proxy", "sum"),
+                transaction_count=(schema.PRODUCT_ID, "size"),
+                basket_count=(schema.BASKET_ID, "nunique"),
+            )
+            denominator = household_stats["gross_value"].clip(lower=1e-6)
+            household_stats["household_avg_sales_log"] = np.log1p(household_stats["mean_sales"].clip(lower=0.0))
+            household_stats["household_discount_rate"] = (
+                household_stats["total_discount"] / denominator
+            ).clip(lower=0.0, upper=1.0)
+            household_stats["household_coupon_discount_rate"] = (
+                household_stats["total_coupon_discount"] / denominator
+            ).clip(lower=0.0, upper=1.0)
+            household_stats["household_history_depth_log"] = np.log1p(household_stats["transaction_count"].clip(lower=0.0))
+
+        product_ids = group[schema.PRODUCT_ID].astype(int)
+        household_ids = group[schema.HOUSEHOLD_ID].astype(int)
+        p_spend = product_ids.map(product_stats["product_spend_signal"]).fillna(0.0).to_numpy(dtype=float)
+        p_sales = product_ids.map(product_stats["product_avg_sales_log"]).fillna(0.0).to_numpy(dtype=float)
+        p_quantity = product_ids.map(product_stats["product_quantity_log"]).fillna(0.0).to_numpy(dtype=float)
+        p_discount = product_ids.map(product_stats["product_discount_rate"]).fillna(0.0).to_numpy(dtype=float)
+        p_coupon = product_ids.map(product_stats["product_coupon_discount_rate"]).fillna(0.0).to_numpy(dtype=float)
+
+        if household_stats.empty:
+            h_sales = np.zeros(len(group), dtype=float)
+            h_discount = np.zeros(len(group), dtype=float)
+            h_coupon = np.zeros(len(group), dtype=float)
+            h_depth = np.zeros(len(group), dtype=float)
+        else:
+            h_sales = household_ids.map(household_stats["household_avg_sales_log"]).fillna(0.0).to_numpy(dtype=float)
+            h_discount = household_ids.map(household_stats["household_discount_rate"]).fillna(0.0).to_numpy(dtype=float)
+            h_coupon = household_ids.map(household_stats["household_coupon_discount_rate"]).fillna(0.0).to_numpy(dtype=float)
+            h_depth = household_ids.map(household_stats["household_history_depth_log"]).fillna(0.0).to_numpy(dtype=float)
+
+        value_match = np.exp(-np.abs(p_sales - h_sales))
+        discount_match = np.clip(1.0 - np.abs(p_discount - h_discount), 0.0, 1.0)
+        coupon_product = p_coupon * h_coupon
+
+        duration_days = 0.0
+        if int(campaign_id) in campaign_dates.index:
+            row = campaign_dates.loc[int(campaign_id)]
+            duration_days = max(0.0, (pd.Timestamp(row["end_date"]) - pd.Timestamp(row["start_date"])).days)
+
+        out.loc[index, "product_spend_signal"] = p_spend
+        out.loc[index, "product_avg_sales_log"] = p_sales
+        out.loc[index, "product_quantity_log"] = p_quantity
+        out.loc[index, "product_discount_rate"] = p_discount
+        out.loc[index, "product_coupon_discount_rate"] = p_coupon
+        out.loc[index, "household_avg_sales_log"] = h_sales
+        out.loc[index, "household_discount_rate"] = h_discount
+        out.loc[index, "household_coupon_discount_rate"] = h_coupon
+        out.loc[index, "household_history_depth_log"] = h_depth
+        out.loc[index, "household_value_match_signal"] = value_match
+        out.loc[index, "household_discount_match_signal"] = discount_match
+        out.loc[index, "household_coupon_product_signal"] = coupon_product
+        out.loc[index, "campaign_duration_days_log"] = math.log1p(duration_days)
+
+    for feature in XGB_VALUE_FEATURES:
+        out[feature] = pd.to_numeric(out[feature], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return out
+
+
 def _candidate_configs(args: argparse.Namespace) -> list[dict[str, float | int | str | bool]]:
     if not args.search:
         return [
@@ -322,6 +551,31 @@ def _candidate_configs(args: argparse.Namespace) -> list[dict[str, float | int |
             (250, 0.015, 3, "rank:ndcg", False),
         ]
     ]
+    if args.wide_search:
+        configs.extend(
+            {
+                "n_estimators": n_estimators,
+                "learning_rate": learning_rate,
+                "max_depth": max_depth,
+                "objective": "rank:ndcg",
+                "positive_train_events_only": False,
+                "subsample": subsample,
+                "colsample_bytree": colsample_bytree,
+            }
+            for n_estimators, learning_rate, max_depth, subsample, colsample_bytree in [
+                (80, 0.05, 2, 0.9, 0.9),
+                (120, 0.02, 2, 0.9, 0.9),
+                (180, 0.02, 2, 0.9, 0.9),
+                (320, 0.015, 2, 0.9, 0.9),
+                (400, 0.01, 2, 0.9, 0.9),
+                (120, 0.04, 2, 0.8, 0.9),
+                (180, 0.04, 2, 0.8, 0.8),
+                (250, 0.02, 3, 0.8, 0.8),
+                (320, 0.01, 3, 0.8, 0.8),
+                (120, 0.03, 4, 0.8, 0.8),
+                (180, 0.02, 4, 0.8, 0.8),
+            ]
+        )
     if args.search_objectives:
         configs.extend(
             {
@@ -382,16 +636,29 @@ def _evaluate_config(
     train_groups,
     val_x,
     val_ordered: pd.DataFrame,
+    val_heuristic_scores: np.ndarray,
     val_events: pd.DataFrame,
     val_truth: pd.DataFrame,
     eval_ks: list[int],
+    primary_metric: str,
+    blend_weights: list[float],
 ) -> tuple[object, dict[str, float]]:
     ranker = _fit_ranker(xgb, config, device, seed, train_x, train_y, train_groups)
     val_scores = ranker.predict(val_x)
-    val_ranked = _rank_scores(val_ordered, val_scores, max(eval_ks))
+    blend_weight, metrics = _select_blend_weight(
+        val_ordered,
+        val_scores,
+        val_heuristic_scores,
+        val_events,
+        val_truth,
+        eval_ks,
+        primary_metric,
+        blend_weights,
+    )
     row = {"model_name": MODEL_NAME, "split": "validation", "device": device}
     row.update(config)
-    row.update(base.evaluate_ranked(val_ranked, val_truth, val_events, eval_ks))
+    row["xgb_blend_weight"] = blend_weight
+    row.update(metrics)
     return ranker, row
 
 
@@ -426,6 +693,8 @@ def main() -> int:
     features = neural.attach_labels(neural.add_model_features(features), truth)
     if args.use_derived_features:
         features = add_xgb_derived_features(features)
+    if args.use_value_features:
+        features = add_value_features(features, sources)
     if args.use_response_priors:
         features = add_xgb_response_prior_features(features)
     if args.use_content_features:
@@ -434,6 +703,7 @@ def main() -> int:
         args.use_response_priors,
         args.use_content_features,
         args.use_derived_features,
+        args.use_value_features,
     )
 
     train = features[features["split"] == "train"].reset_index(drop=True)
@@ -444,6 +714,9 @@ def main() -> int:
 
     val_x, val_y, val_groups, val_ordered = _grouped_xy(validation, feature_columns)
     test_x, test_y, test_groups, test_ordered = _grouped_xy(test, feature_columns)
+    val_heuristic_scores = _heuristic_scores(val_ordered, device)
+    test_heuristic_scores = _heuristic_scores(test_ordered, device)
+    blend_weights = _candidate_blend_weights(args.search_score_blend, args.blend_step)
 
     val_events = events[events["split"] == "validation"].copy()
     test_events = events[events["split"] == "test"].copy()
@@ -465,9 +738,12 @@ def main() -> int:
             train_groups,
             val_x,
             val_ordered,
+            val_heuristic_scores,
             val_events,
             val_truth,
             eval_ks,
+            args.primary_metric,
+            blend_weights,
         )
         search_rows.append(row)
 
@@ -496,18 +772,21 @@ def main() -> int:
             "colsample_bytree",
         ]
     }
+    best_blend_weight = float(best_row.get("xgb_blend_weight", 1.0))
     best_train = _filter_positive_event_groups(train, bool(best_config.get("positive_train_events_only", False)))
     train_x, train_y, train_groups, _ = _grouped_xy(best_train, feature_columns)
     best_ranker = _fit_ranker(xgb, best_config, device, args.seed, train_x, train_y, train_groups)
     val_scores = best_ranker.predict(val_x)
-    val_ranked = _rank_scores(val_ordered, val_scores, max_k)
+    val_final_scores = _blend_scores(val_ordered, val_scores, val_heuristic_scores, best_blend_weight)
+    val_ranked = _rank_scores(val_ordered, val_final_scores, max_k)
 
     final_train = pd.concat([train, validation], ignore_index=True)
     final_train = _filter_positive_event_groups(final_train, bool(best_config.get("positive_train_events_only", False)))
     final_train_x, final_train_y, final_train_groups, _ = _grouped_xy(final_train, feature_columns)
     final_ranker = _fit_ranker(xgb, best_config, device, args.seed, final_train_x, final_train_y, final_train_groups)
     test_scores = final_ranker.predict(test_x)
-    test_ranked = _rank_scores(test_ordered, test_scores, max_k)
+    test_final_scores = _blend_scores(test_ordered, test_scores, test_heuristic_scores, best_blend_weight)
+    test_ranked = _rank_scores(test_ordered, test_final_scores, max_k)
 
     comparison_rows = []
     for split, ranked, split_events, split_truth, trained_on in [
@@ -522,6 +801,7 @@ def main() -> int:
             "trained_on": trained_on,
             "primary_metric": args.primary_metric,
             "selection_tolerance": args.selection_tolerance if args.search else 0.0,
+            "xgb_blend_weight": best_blend_weight,
         }
         row.update(best_config)
         row.update(base.evaluate_ranked(ranked, split_truth, split_events, eval_ks))
