@@ -80,6 +80,20 @@ XGB_TEXT_EMBEDDING_FEATURES = [
     "text_embedding_history_count_log",
     "text_embedding_has_profile",
 ]
+XGB_CATEGORY_EMBEDDING_FEATURES = [
+    "category_embedding_profile_similarity",
+    "category_embedding_max_similarity",
+    "category_embedding_profile_norm",
+    "category_embedding_history_count_log",
+    "category_embedding_has_profile",
+]
+XGB_EVENT_CATEGORY_FEATURES = [
+    "event_category_count_log",
+    "event_category_share",
+    "event_category_global_mean",
+    "event_category_global_max",
+    "event_category_global_rank_pct",
+]
 XGB_VALUE_FEATURES = [
     "product_spend_signal",
     "product_avg_sales_log",
@@ -137,10 +151,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--positive-train-events-only", action="store_true")
     parser.add_argument("--subsample", type=float, default=0.9)
     parser.add_argument("--colsample-bytree", type=float, default=0.9)
+    parser.add_argument("--min-child-weight", type=float, default=2.0)
+    parser.add_argument("--reg-lambda", type=float, default=1.0)
     parser.add_argument("--search", action="store_true", help="Tune XGBoost configs on validation before final test.")
     parser.add_argument("--wide-search", action="store_true", help="Search a wider XGBoost grid on validation.")
     parser.add_argument("--search-objectives", action="store_true", help="Also search rank:pairwise/rank:map objectives.")
     parser.add_argument("--ensemble-top-n", type=int, default=1, help="Average the top-N validation-selected XGBoost rankers.")
+    parser.add_argument(
+        "--final-train-scope",
+        choices=["train", "train_plus_validation"],
+        default="train_plus_validation",
+        help="Data used to fit the final test-scoring model after validation selection.",
+    )
     parser.add_argument("--search-score-blend", action="store_true", help="Tune a validation-selected blend of XGBoost and repeat-cadence scores.")
     parser.add_argument("--blend-step", type=float, default=0.05, help="Grid step for --search-score-blend.")
     parser.add_argument("--search-rank-fusion", action="store_true", help="Tune validation-selected rank fusion over XGBoost and heuristic ranks.")
@@ -163,6 +185,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use-text-embedding-features", action="store_true", help="Add TF-IDF/SVD product-text profile features.")
     parser.add_argument("--text-embedding-components", type=int, default=32)
     parser.add_argument("--text-max-features", type=int, default=4096)
+    parser.add_argument("--use-category-embedding-features", action="store_true", help="Add train-period category co-occurrence embedding features.")
+    parser.add_argument("--category-embedding-components", type=int, default=24)
+    parser.add_argument("--use-event-category-features", action="store_true", help="Add within-event coupon category concentration features.")
     parser.add_argument("--use-derived-features", action="store_true", help="Add event-relative rank and interaction features.")
     parser.add_argument("--use-value-features", action="store_true", help="Add historical price, spend, and discount-sensitivity features.")
     parser.add_argument("--use-coupon-family-features", action="store_true", help="Add campaign coupon-UPC family repeat features.")
@@ -175,6 +200,8 @@ def _feature_columns(
     use_response_priors: bool = False,
     use_content_features: bool = False,
     use_text_embedding_features: bool = False,
+    use_category_embedding_features: bool = False,
+    use_event_category_features: bool = False,
     use_derived_features: bool = False,
     use_value_features: bool = False,
     use_coupon_family_features: bool = False,
@@ -195,6 +222,10 @@ def _feature_columns(
         columns.extend(XGB_CONTENT_FEATURES)
     if use_text_embedding_features:
         columns.extend(XGB_TEXT_EMBEDDING_FEATURES)
+    if use_category_embedding_features:
+        columns.extend(XGB_CATEGORY_EMBEDDING_FEATURES)
+    if use_event_category_features:
+        columns.extend(XGB_EVENT_CATEGORY_FEATURES)
     return columns
 
 
@@ -734,6 +765,197 @@ def add_text_embedding_features(
     return out
 
 
+def _category_embeddings(
+    sources: dict[str, pd.DataFrame],
+    components: int,
+) -> tuple[pd.DataFrame, list[str]]:
+    if components < 1:
+        raise ValueError("--category-embedding-components must be >= 1.")
+
+    try:
+        from scipy import sparse
+        from sklearn.decomposition import TruncatedSVD
+        from sklearn.feature_extraction.text import TfidfTransformer
+        from sklearn.preprocessing import normalize
+    except Exception as exc:
+        raise RuntimeError("scikit-learn and scipy are required for --use-category-embedding-features.") from exc
+
+    products = sources["products"][[schema.PRODUCT_ID, "product_category"]].drop_duplicates(schema.PRODUCT_ID).copy()
+    products["product_category"] = _clean_text_column(products, "product_category")
+    val_start = pd.Timestamp(sources["val"]["transaction_timestamp"].min())
+    history = sources["transactions"][
+        sources["transactions"]["transaction_timestamp"] < val_start
+    ][[schema.HOUSEHOLD_ID, schema.PRODUCT_ID]].copy()
+    history = history.merge(products, on=schema.PRODUCT_ID, how="left")
+    history["product_category"] = _clean_text_column(history, "product_category")
+    counts = history.groupby([schema.HOUSEHOLD_ID, "product_category"]).size().reset_index(name="count")
+    if counts.empty:
+        return pd.DataFrame({"product_category": [], "category_emb_0": []}), ["category_emb_0"]
+
+    households = pd.Index(sorted(counts[schema.HOUSEHOLD_ID].astype(int).unique()))
+    categories = pd.Index(sorted(counts["product_category"].astype(str).unique()))
+    household_codes = households.get_indexer(counts[schema.HOUSEHOLD_ID].astype(int))
+    category_codes = categories.get_indexer(counts["product_category"].astype(str))
+    matrix = sparse.csr_matrix(
+        (
+            counts["count"].astype(float).to_numpy(),
+            (household_codes, category_codes),
+        ),
+        shape=(len(households), len(categories)),
+    )
+    weighted = TfidfTransformer(sublinear_tf=True).fit_transform(matrix)
+    if min(weighted.shape) <= 1:
+        embedding = normalize(weighted.T, norm="l2", copy=True).toarray().astype(np.float32)
+    else:
+        n_components = min(int(components), max(1, min(weighted.shape) - 1))
+        svd = TruncatedSVD(n_components=n_components, random_state=42)
+        # components_.T represents category coordinates in the latent household-category space.
+        svd.fit(weighted)
+        embedding = normalize(svd.components_.T, norm="l2", copy=False).astype(np.float32)
+
+    columns = [f"category_emb_{idx}" for idx in range(embedding.shape[1])]
+    out = pd.DataFrame(embedding, columns=columns)
+    out.insert(0, "product_category", categories.astype(str).to_numpy())
+    return out, columns
+
+
+def add_category_embedding_features(
+    features: pd.DataFrame,
+    sources: dict[str, pd.DataFrame],
+    components: int = 24,
+) -> pd.DataFrame:
+    """Add latent category-neighbor features from training-period category co-occurrence."""
+
+    out = features.copy()
+    for feature in XGB_CATEGORY_EMBEDDING_FEATURES:
+        out[feature] = 0.0
+
+    category_embeddings, embedding_columns = _category_embeddings(sources, components)
+    products = sources["products"][[schema.PRODUCT_ID, "product_category"]].drop_duplicates(schema.PRODUCT_ID).copy()
+    products["product_category"] = _clean_text_column(products, "product_category")
+    product_categories = products.set_index(schema.PRODUCT_ID)["product_category"].to_dict()
+    embedding_map = {
+        str(row["product_category"]): row[embedding_columns].to_numpy(dtype=np.float32)
+        for _, row in category_embeddings.iterrows()
+    }
+    zero_vector = np.zeros(len(embedding_columns), dtype=np.float32)
+    transactions = sources["transactions"][
+        [schema.HOUSEHOLD_ID, schema.PRODUCT_ID, "transaction_timestamp"]
+    ].copy()
+    transactions = transactions.merge(products, on=schema.PRODUCT_ID, how="left")
+    transactions["product_category"] = _clean_text_column(transactions, "product_category")
+
+    for campaign_id, index in out.groupby("campaign_id", sort=True).groups.items():
+        group = out.loc[index].copy()
+        start = pd.Timestamp(group["coupon_start_date"].iloc[0])
+        households = set(group[schema.HOUSEHOLD_ID].astype(int))
+        history = transactions[
+            transactions[schema.HOUSEHOLD_ID].astype(int).isin(households)
+            & (transactions["transaction_timestamp"] < start)
+        ].copy()
+        if history.empty:
+            continue
+
+        category_counts = (
+            history.groupby([schema.HOUSEHOLD_ID, "product_category"])
+            .size()
+            .reset_index(name="count")
+        )
+        profile_map: dict[int, tuple[np.ndarray, np.ndarray, float]] = {}
+        for household_id, household_counts in category_counts.groupby(schema.HOUSEHOLD_ID, sort=False):
+            categories = household_counts["product_category"].astype(str).tolist()
+            vectors = np.vstack([embedding_map.get(category, zero_vector) for category in categories]).astype(np.float32)
+            weights = np.log1p(household_counts["count"].to_numpy(dtype=np.float32))
+            total_weight = float(weights.sum())
+            if total_weight <= 0.0:
+                profile = zero_vector.copy()
+            else:
+                profile = np.average(vectors, axis=0, weights=weights).astype(np.float32)
+            profile_map[int(household_id)] = (profile, vectors, float(household_counts["count"].sum()))
+
+        profile_similarity = np.zeros(len(group), dtype=np.float32)
+        max_similarity = np.zeros(len(group), dtype=np.float32)
+        profile_norms = np.zeros(len(group), dtype=np.float32)
+        history_counts = np.zeros(len(group), dtype=np.float32)
+        candidate_categories = group[schema.PRODUCT_ID].astype(int).map(product_categories).fillna("UNKNOWN").astype(str)
+        candidate_vectors = np.vstack([embedding_map.get(category, zero_vector) for category in candidate_categories])
+
+        for position, (household_id, candidate_vector) in enumerate(
+            zip(group[schema.HOUSEHOLD_ID].astype(int).to_numpy(), candidate_vectors, strict=False)
+        ):
+            if int(household_id) not in profile_map:
+                continue
+            profile, history_vectors, history_count = profile_map[int(household_id)]
+            candidate_norm = float(np.linalg.norm(candidate_vector))
+            profile_norm = float(np.linalg.norm(profile))
+            history_counts[position] = history_count
+            profile_norms[position] = profile_norm
+            if candidate_norm > 0.0 and profile_norm > 0.0:
+                profile_similarity[position] = float(np.dot(candidate_vector, profile) / (candidate_norm * profile_norm))
+            if candidate_norm > 0.0 and len(history_vectors) > 0:
+                similarities = history_vectors @ candidate_vector / np.maximum(
+                    np.linalg.norm(history_vectors, axis=1) * candidate_norm,
+                    1e-6,
+                )
+                max_similarity[position] = float(np.max(similarities))
+
+        out.loc[index, "category_embedding_profile_similarity"] = np.clip(profile_similarity, -1.0, 1.0)
+        out.loc[index, "category_embedding_max_similarity"] = np.clip(max_similarity, -1.0, 1.0)
+        out.loc[index, "category_embedding_profile_norm"] = profile_norms
+        out.loc[index, "category_embedding_history_count_log"] = np.log1p(history_counts)
+        out.loc[index, "category_embedding_has_profile"] = (history_counts > 0).astype(np.float32)
+
+    for feature in XGB_CATEGORY_EMBEDDING_FEATURES:
+        out[feature] = pd.to_numeric(out[feature], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return out
+
+
+def add_event_category_features(features: pd.DataFrame) -> pd.DataFrame:
+    """Add event-local category concentration features.
+
+    These features describe the coupon candidate set available in one
+    household-campaign event and do not use future purchase labels.
+    """
+
+    out = features.copy()
+    category = _clean_text_column(out, "product_category")
+    out["_event_category"] = category
+    out["_global_signal"] = pd.to_numeric(out["global_signal"], errors="coerce").fillna(0.0)
+    event_size = out.groupby(base.EVENT_COL)[schema.PRODUCT_ID].transform("size").clip(lower=1)
+    category_group = out.groupby([base.EVENT_COL, "_event_category"])
+    category_count = category_group[schema.PRODUCT_ID].transform("size")
+    category_global_mean = category_group["_global_signal"].transform("mean")
+    category_global_max = category_group["_global_signal"].transform("max")
+
+    category_summary = (
+        out[[base.EVENT_COL, "_event_category"]]
+        .assign(_category_global_mean=category_global_mean)
+        .drop_duplicates([base.EVENT_COL, "_event_category"])
+    )
+    category_summary["_event_category_rank"] = category_summary.groupby(base.EVENT_COL)["_category_global_mean"].rank(
+        method="dense",
+        ascending=False,
+    )
+    category_summary["_event_category_total"] = category_summary.groupby(base.EVENT_COL)["_event_category"].transform("size")
+    category_summary["event_category_global_rank_pct"] = 1.0 - (
+        (category_summary["_event_category_rank"] - 1.0)
+        / category_summary["_event_category_total"].sub(1.0).replace(0.0, 1.0)
+    )
+
+    out["event_category_count_log"] = np.log1p(category_count.to_numpy(dtype=float))
+    out["event_category_share"] = category_count.to_numpy(dtype=float) / event_size.to_numpy(dtype=float)
+    out["event_category_global_mean"] = category_global_mean.to_numpy(dtype=float)
+    out["event_category_global_max"] = category_global_max.to_numpy(dtype=float)
+    out = out.merge(
+        category_summary[[base.EVENT_COL, "_event_category", "event_category_global_rank_pct"]],
+        on=[base.EVENT_COL, "_event_category"],
+        how="left",
+    )
+    for feature in XGB_EVENT_CATEGORY_FEATURES:
+        out[feature] = pd.to_numeric(out[feature], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return out.drop(columns=["_event_category", "_global_signal"])
+
+
 def add_value_features(features: pd.DataFrame, sources: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Add historical value and discount-sensitivity signals.
 
@@ -1091,6 +1313,8 @@ def _candidate_configs(args: argparse.Namespace) -> list[dict[str, float | int |
                 "positive_train_events_only": args.positive_train_events_only,
                 "subsample": args.subsample,
                 "colsample_bytree": args.colsample_bytree,
+                "min_child_weight": args.min_child_weight,
+                "reg_lambda": args.reg_lambda,
             }
         ]
     configs = [
@@ -1102,6 +1326,8 @@ def _candidate_configs(args: argparse.Namespace) -> list[dict[str, float | int |
             "positive_train_events_only": positive_only,
             "subsample": args.subsample,
             "colsample_bytree": args.colsample_bytree,
+            "min_child_weight": args.min_child_weight,
+            "reg_lambda": args.reg_lambda,
         }
         for n_estimators, learning_rate, max_depth, objective, positive_only in [
             (120, 0.03, 2, "rank:ndcg", False),
@@ -1122,6 +1348,8 @@ def _candidate_configs(args: argparse.Namespace) -> list[dict[str, float | int |
                 "positive_train_events_only": False,
                 "subsample": subsample,
                 "colsample_bytree": colsample_bytree,
+                "min_child_weight": args.min_child_weight,
+                "reg_lambda": args.reg_lambda,
             }
             for n_estimators, learning_rate, max_depth, subsample, colsample_bytree in [
                 (80, 0.05, 2, 0.9, 0.9),
@@ -1147,6 +1375,8 @@ def _candidate_configs(args: argparse.Namespace) -> list[dict[str, float | int |
                 "positive_train_events_only": positive_only,
                 "subsample": args.subsample,
                 "colsample_bytree": args.colsample_bytree,
+                "min_child_weight": args.min_child_weight,
+                "reg_lambda": args.reg_lambda,
             }
             for n_estimators, learning_rate, max_depth, objective, positive_only in [
                 (180, 0.03, 2, "rank:pairwise", False),
@@ -1177,8 +1407,8 @@ def _fit_ranker(xgb, config: dict[str, float | int | str | bool], device: str, s
         max_depth=int(config["max_depth"]),
         subsample=float(config["subsample"]),
         colsample_bytree=float(config["colsample_bytree"]),
-        min_child_weight=2,
-        reg_lambda=1.0,
+        min_child_weight=float(config.get("min_child_weight", 2.0)),
+        reg_lambda=float(config.get("reg_lambda", 1.0)),
         random_state=seed,
         tree_method="hist",
         device=device,
@@ -1196,6 +1426,8 @@ def _config_from_row(row: dict[str, object]) -> dict[str, float | int | str | bo
         "positive_train_events_only": bool(row["positive_train_events_only"]),
         "subsample": float(row["subsample"]),
         "colsample_bytree": float(row["colsample_bytree"]),
+        "min_child_weight": float(row.get("min_child_weight", 2.0)),
+        "reg_lambda": float(row.get("reg_lambda", 1.0)),
     }
 
 
@@ -1353,10 +1585,16 @@ def main() -> int:
             args.text_embedding_components,
             args.text_max_features,
         )
+    if args.use_category_embedding_features:
+        features = add_category_embedding_features(features, sources, args.category_embedding_components)
+    if args.use_event_category_features:
+        features = add_event_category_features(features)
     feature_columns = _feature_columns(
         args.use_response_priors,
         args.use_content_features,
         args.use_text_embedding_features,
+        args.use_category_embedding_features,
+        args.use_event_category_features,
         args.use_derived_features,
         args.use_value_features,
         args.use_coupon_family_features,
@@ -1412,6 +1650,7 @@ def main() -> int:
         row["expected_lead_min_days"] = args.expected_lead_min_days
         row["expected_lead_max_days"] = args.expected_lead_max_days
         row["ensemble_top_n"] = args.ensemble_top_n
+        row["final_train_scope"] = args.final_train_scope
         search_rows.append(row)
 
     if not search_rows:
@@ -1437,6 +1676,8 @@ def main() -> int:
             "positive_train_events_only",
             "subsample",
             "colsample_bytree",
+            "min_child_weight",
+            "reg_lambda",
         ]
     }
     best_blend_weight = float(best_row.get("xgb_blend_weight", 1.0))
@@ -1472,7 +1713,10 @@ def main() -> int:
             val_final_scores = _blend_scores(val_ordered, val_scores, val_heuristic_scores, best_blend_weight)
     val_ranked = _rank_scores(val_ordered, val_final_scores, max_k)
 
-    final_train = pd.concat([train, validation], ignore_index=True)
+    if args.final_train_scope == "train":
+        final_train = train.copy()
+    else:
+        final_train = pd.concat([train, validation], ignore_index=True)
     if args.ensemble_top_n > 1:
         test_final_scores, final_rankers = _average_ranker_scores(
             xgb,
@@ -1499,7 +1743,7 @@ def main() -> int:
     comparison_rows = []
     for split, ranked, split_events, split_truth, trained_on in [
         ("validation", val_ranked, val_events, val_truth, "train"),
-        ("test", test_ranked, test_events, test_truth, "train_plus_validation"),
+        ("test", test_ranked, test_events, test_truth, args.final_train_scope),
     ]:
         row = {
             "model_name": MODEL_NAME,
@@ -1518,6 +1762,7 @@ def main() -> int:
             "expected_lead_min_days": args.expected_lead_min_days,
             "expected_lead_max_days": args.expected_lead_max_days,
             "ensemble_top_n": args.ensemble_top_n,
+            "final_train_scope": args.final_train_scope,
         }
         row.update(best_rank_fusion_config)
         row.update(best_config)

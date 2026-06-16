@@ -136,6 +136,9 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme expected_lead_timing --expected-lead-min-days 1 --expected-lead-max-days 2 --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --ensemble-top-n 2
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --use-text-embedding-features
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --use-category-embedding-features
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --use-event-category-features
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --final-train-scope train
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-score-blend --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-rank-fusion --primary-metric ndcg_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --wide-search --use-value-features --primary-metric recall_at_20
@@ -161,6 +164,9 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 | XGBoost ensemble top-2 | 0.4135 | 0.3277 | 0.5321 | 0.5058 | 0.3552 |
 | XGBoost ensemble top-3 | 0.4013 | 0.3234 | 0.5229 | 0.5081 | 0.3557 |
 | TF-IDF/SVD product-text profile | 0.4006 | 0.3176 | 0.5138 | 0.5188 | 0.3529 |
+| Category co-occurrence embedding | 0.4095 | 0.3222 | 0.5321 | 0.5207 | 0.3534 |
+| Event category concentration features | 0.4105 | 0.3267 | 0.5321 | 0.5058 | 0.3552 |
+| Final fit on train only | 0.4146 | 0.3228 | 0.5321 | 0.5058 | 0.3494 |
 | Validation score blend | 0.3945 | 0.3079 | 0.5046 | 0.5155 | 0.3442 |
 | Rank fusion, selected on NDCG@20 | 0.4103 | 0.3188 | 0.5321 | 0.5215 | 0.3505 |
 
@@ -195,6 +201,30 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 ```
 
 This builds a TF-IDF plus TruncatedSVD embedding from product department, category, type, brand, and package-size text, then compares each candidate product against the household's prior product-text profile before the campaign start. It is leakage-safe and improves broader Recall@20 in this run, but held-out NDCG@10 drops, so it remains an ablation rather than the final model.
+
+Category co-occurrence embedding features are available through:
+
+```bash
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --use-category-embedding-features
+```
+
+This learns latent product-category vectors from train-period household-category co-occurrence, then compares each candidate category with the household's prior category profile. It improves broader Recall@20, which confirms the diagnosis that many misses are non-exact-repeat items, but NDCG@10 drops because the top-rank repeat/cadence signal is still more reliable.
+
+Event category concentration features are available through:
+
+```bash
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --use-event-category-features
+```
+
+These features describe how concentrated a household-campaign candidate set is in a category. They are label-free and useful diagnostically, but XGBoost does not use them in the current best tree structure.
+
+The final training scope can be changed with:
+
+```bash
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --final-train-scope train
+```
+
+This was tested because validation campaigns have a much higher positive-event rate than test campaigns. Training the final model on train only reduced held-out NDCG@10, so the final model keeps train-plus-validation fitting after validation selection.
 
 Event-relative rank and interaction features are available through:
 
@@ -232,6 +262,9 @@ A pointwise XGBoost classifier was also checked as a negative ablation. The best
 | XGBoost plus heuristic score blend | Negative ablation | Validation improved but held-out test worsened |
 | XGBoost plus rank fusion | Negative ablation | Better Recall@20 in one setting, worse held-out NDCG@10/NDCG@20 |
 | XGBoost validation ensemble | Negative ablation | Top-2 stayed close but did not beat the single pull-forward model on NDCG@10 |
+| XGBoost final train scope | Negative ablation | Train-only final fitting reduced held-out NDCG@10 despite validation/test drift |
+| Category co-occurrence embedding | Optional ablation | Better Recall@20, lower NDCG@10; confirms non-exact-repeat misses |
+| Event category concentration features | Negative ablation | Label-free campaign category context did not improve top-rank metrics |
 | Campaign-type expert models | Negative ablation | Improved Recall@20 slightly, but hurt NDCG@10 |
 | Type-A filtering and Type-B validation | Negative ablation | Did not beat the default held-out NDCG@10 or Hit@10 |
 | LightGBM LambdaRank | Negative ablation | Best checked variant reached about 0.3225 held-out NDCG@10, below XGBoost |

@@ -229,6 +229,74 @@ def test_text_embedding_features_use_prior_product_text_history():
     assert out["text_embedding_history_count_log"].nunique() == 1
 
 
+def test_category_embedding_features_capture_related_nonexact_categories():
+    features = pd.DataFrame(
+        {
+            "event_id": ["a", "a"],
+            "campaign_id": [1, 1],
+            "coupon_start_date": ["2026-02-10", "2026-02-10"],
+            "household_id": [5, 5],
+            "product_id": [10, 12],
+            "label": [0.0, 0.0],
+        }
+    )
+    products = pd.DataFrame(
+        {
+            "product_id": [10, 11, 12],
+            "product_category": ["BABY FOODS", "DIAPERS & DISPOSABLES", "SOAP - LIQUID & BAR"],
+        }
+    )
+    sources = {
+        "products": products,
+        "val": pd.DataFrame({"transaction_timestamp": pd.to_datetime(["2026-02-01"])}),
+        "transactions": pd.DataFrame(
+            {
+                "household_id": [1, 1, 2, 2, 3, 4, 5],
+                "product_id": [10, 11, 10, 11, 12, 12, 11],
+                "transaction_timestamp": pd.to_datetime(
+                    [
+                        "2026-01-01",
+                        "2026-01-02",
+                        "2026-01-03",
+                        "2026-01-04",
+                        "2026-01-05",
+                        "2026-01-06",
+                        "2026-01-07",
+                    ]
+                ),
+            }
+        ),
+    }
+
+    out = xgbr.add_category_embedding_features(features, sources, components=2)
+
+    baby_similarity = out.loc[out["product_id"].eq(10), "category_embedding_max_similarity"].iloc[0]
+    soap_similarity = out.loc[out["product_id"].eq(12), "category_embedding_max_similarity"].iloc[0]
+    assert baby_similarity > soap_similarity
+    assert out["category_embedding_has_profile"].tolist() == [1.0, 1.0]
+
+
+def test_event_category_features_measure_candidate_set_concentration():
+    features = pd.DataFrame(
+        {
+            "event_id": ["a", "a", "a"],
+            "product_id": [1, 2, 3],
+            "product_category": ["BABY FOODS", "BABY FOODS", "SOAP"],
+            "global_signal": [0.8, 0.4, 0.9],
+        }
+    )
+
+    out = xgbr.add_event_category_features(features)
+
+    baby = out[out["product_category"].eq("BABY FOODS")]
+    soap = out[out["product_category"].eq("SOAP")].iloc[0]
+    assert baby["event_category_count_log"].nunique() == 1
+    assert math.isclose(float(baby["event_category_share"].iloc[0]), 2.0 / 3.0)
+    assert math.isclose(float(baby["event_category_global_mean"].iloc[0]), 0.6)
+    assert math.isclose(float(soap["event_category_global_rank_pct"]), 1.0)
+    assert float(baby["event_category_global_rank_pct"].iloc[0]) < float(soap["event_category_global_rank_pct"])
+
+
 def test_coupon_family_features_use_prior_same_coupon_upc_history():
     features = pd.DataFrame(
         {
