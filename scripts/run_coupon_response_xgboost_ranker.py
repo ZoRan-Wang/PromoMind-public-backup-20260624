@@ -80,6 +80,13 @@ XGB_TEXT_EMBEDDING_FEATURES = [
     "text_embedding_history_count_log",
     "text_embedding_has_profile",
 ]
+XGB_TEXT_MATCH_FEATURES = [
+    "text_match_max_similarity",
+    "text_match_top3_similarity",
+    "text_match_recent_max_similarity",
+    "text_match_history_count_log",
+    "text_match_has_profile",
+]
 XGB_CATEGORY_EMBEDDING_FEATURES = [
     "category_embedding_profile_similarity",
     "category_embedding_max_similarity",
@@ -191,6 +198,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use-text-embedding-features", action="store_true", help="Add TF-IDF/SVD product-text profile features.")
     parser.add_argument("--text-embedding-components", type=int, default=32)
     parser.add_argument("--text-max-features", type=int, default=4096)
+    parser.add_argument(
+        "--use-text-match-features",
+        action="store_true",
+        help="Add direct TF-IDF product-text match features against recent household history.",
+    )
+    parser.add_argument("--text-match-max-features", type=int, default=8192)
+    parser.add_argument("--text-match-history-products", type=int, default=60)
+    parser.add_argument("--text-match-recent-products", type=int, default=10)
     parser.add_argument("--use-category-embedding-features", action="store_true", help="Add train-period category co-occurrence embedding features.")
     parser.add_argument("--category-embedding-components", type=int, default=24)
     parser.add_argument("--use-event-category-features", action="store_true", help="Add within-event coupon category concentration features.")
@@ -206,6 +221,7 @@ def _feature_columns(
     use_response_priors: bool = False,
     use_content_features: bool = False,
     use_text_embedding_features: bool = False,
+    use_text_match_features: bool = False,
     use_category_embedding_features: bool = False,
     use_event_category_features: bool = False,
     use_derived_features: bool = False,
@@ -228,6 +244,8 @@ def _feature_columns(
         columns.extend(XGB_CONTENT_FEATURES)
     if use_text_embedding_features:
         columns.extend(XGB_TEXT_EMBEDDING_FEATURES)
+    if use_text_match_features:
+        columns.extend(XGB_TEXT_MATCH_FEATURES)
     if use_category_embedding_features:
         columns.extend(XGB_CATEGORY_EMBEDDING_FEATURES)
     if use_event_category_features:
@@ -711,6 +729,139 @@ def _product_text_embeddings(
     embeddings = pd.DataFrame(embedding, columns=columns)
     embeddings.insert(0, schema.PRODUCT_ID, product_meta[schema.PRODUCT_ID].astype(int).to_numpy())
     return embeddings, columns
+
+
+def _product_text_tfidf(products: pd.DataFrame, max_features: int):
+    if max_features < 10:
+        raise ValueError("--text-match-max-features must be >= 10.")
+
+    try:
+        from scipy import sparse
+        from sklearn.feature_extraction.text import TfidfVectorizer
+    except Exception as exc:
+        raise RuntimeError("scikit-learn and scipy are required for --use-text-match-features.") from exc
+
+    text_columns = ["department", "brand", "product_category", "product_type", "package_size"]
+    available_columns = [column for column in text_columns if column in products.columns]
+    product_meta = products[[schema.PRODUCT_ID, *available_columns]].drop_duplicates(schema.PRODUCT_ID).copy()
+    for column in text_columns:
+        if column not in product_meta.columns:
+            product_meta[column] = "UNKNOWN"
+    product_meta[schema.PRODUCT_ID] = pd.to_numeric(product_meta[schema.PRODUCT_ID], errors="coerce")
+    product_meta = product_meta.dropna(subset=[schema.PRODUCT_ID]).copy()
+    product_meta[schema.PRODUCT_ID] = product_meta[schema.PRODUCT_ID].astype(int)
+    product_text = _build_product_text(product_meta).replace("", "unknown product")
+    vectorizer = TfidfVectorizer(
+        max_features=max_features,
+        min_df=2 if len(product_meta) >= 50 else 1,
+        ngram_range=(1, 2),
+        analyzer="word",
+        token_pattern=r"(?u)\b[\w/&:-]+\b",
+        lowercase=True,
+        norm="l2",
+        dtype=np.float32,
+    )
+    matrix = vectorizer.fit_transform(product_text)
+    if matrix.shape[1] == 0:
+        matrix = sparse.csr_matrix((len(product_meta), 1), dtype=np.float32)
+    return product_meta[[schema.PRODUCT_ID]], matrix.tocsr().astype(np.float32)
+
+
+def add_text_match_features(
+    features: pd.DataFrame,
+    sources: dict[str, pd.DataFrame],
+    max_features: int = 8192,
+    history_products: int = 60,
+    recent_products: int = 10,
+) -> pd.DataFrame:
+    """Add direct product-text similarity features against prior household history."""
+
+    if history_products < 1:
+        raise ValueError("--text-match-history-products must be >= 1.")
+    if recent_products < 1:
+        raise ValueError("--text-match-recent-products must be >= 1.")
+
+    out = features.copy()
+    for feature in XGB_TEXT_MATCH_FEATURES:
+        out[feature] = 0.0
+
+    product_ids, matrix = _product_text_tfidf(sources["products"], max_features)
+    product_row = {
+        int(product_id): row_idx for row_idx, product_id in enumerate(product_ids[schema.PRODUCT_ID].astype(int))
+    }
+
+    transactions = sources["transactions"][
+        [schema.HOUSEHOLD_ID, schema.PRODUCT_ID, "transaction_timestamp"]
+    ].copy()
+    transactions[schema.HOUSEHOLD_ID] = pd.to_numeric(transactions[schema.HOUSEHOLD_ID], errors="coerce")
+    transactions[schema.PRODUCT_ID] = pd.to_numeric(transactions[schema.PRODUCT_ID], errors="coerce")
+    transactions["transaction_timestamp"] = pd.to_datetime(
+        transactions["transaction_timestamp"],
+        errors="coerce",
+        format="mixed",
+    )
+    transactions["product_text_row"] = transactions[schema.PRODUCT_ID].map(product_row)
+    transactions = transactions.dropna(
+        subset=[schema.HOUSEHOLD_ID, schema.PRODUCT_ID, "transaction_timestamp", "product_text_row"]
+    ).copy()
+    transactions[schema.HOUSEHOLD_ID] = transactions[schema.HOUSEHOLD_ID].astype(int)
+    transactions["product_text_row"] = transactions["product_text_row"].astype(int)
+    transactions = transactions.sort_values([schema.HOUSEHOLD_ID, "transaction_timestamp"])
+
+    out["_product_text_row"] = pd.to_numeric(out[schema.PRODUCT_ID].map(product_row), errors="coerce")
+    history_limit = int(history_products)
+    recent_limit = min(int(recent_products), history_limit)
+
+    for campaign_id, index in out.groupby("campaign_id", sort=True).groups.items():
+        group = out.loc[index]
+        start = pd.Timestamp(group["coupon_start_date"].iloc[0])
+        households = set(group[schema.HOUSEHOLD_ID].astype(int))
+        history = transactions[
+            transactions[schema.HOUSEHOLD_ID].isin(households)
+            & (transactions["transaction_timestamp"] < start)
+        ]
+        if history.empty:
+            continue
+
+        for household_id, candidate_index in group.groupby(schema.HOUSEHOLD_ID, sort=False).groups.items():
+            household_history = history[history[schema.HOUSEHOLD_ID].eq(int(household_id))]
+            if household_history.empty:
+                continue
+            candidate_rows = out.loc[candidate_index, "_product_text_row"]
+            valid_mask = candidate_rows.notna().to_numpy()
+            if not valid_mask.any():
+                continue
+
+            history_rows = household_history["product_text_row"].tail(history_limit).to_numpy(dtype=int)
+            if len(history_rows) == 0:
+                continue
+            candidate_matrix = matrix[candidate_rows[valid_mask].astype(int).to_numpy()]
+            similarity = candidate_matrix @ matrix[history_rows].T
+            similarity_array = similarity.toarray() if hasattr(similarity, "toarray") else np.asarray(similarity)
+            max_similarity = similarity_array.max(axis=1)
+            top_n = min(3, similarity_array.shape[1])
+            if top_n == similarity_array.shape[1]:
+                top3_similarity = similarity_array.mean(axis=1)
+            else:
+                top_values = np.partition(similarity_array, -top_n, axis=1)[:, -top_n:]
+                top3_similarity = top_values.mean(axis=1)
+
+            recent_rows = history_rows[-recent_limit:]
+            recent_similarity = candidate_matrix @ matrix[recent_rows].T
+            recent_array = recent_similarity.toarray() if hasattr(recent_similarity, "toarray") else np.asarray(recent_similarity)
+            recent_max_similarity = recent_array.max(axis=1)
+
+            valid_index = pd.Index(candidate_index)[valid_mask]
+            out.loc[valid_index, "text_match_max_similarity"] = np.clip(max_similarity, 0.0, 1.0)
+            out.loc[valid_index, "text_match_top3_similarity"] = np.clip(top3_similarity, 0.0, 1.0)
+            out.loc[valid_index, "text_match_recent_max_similarity"] = np.clip(recent_max_similarity, 0.0, 1.0)
+            out.loc[valid_index, "text_match_history_count_log"] = math.log1p(float(len(household_history)))
+            out.loc[valid_index, "text_match_has_profile"] = 1.0
+
+    out = out.drop(columns=["_product_text_row"])
+    for feature in XGB_TEXT_MATCH_FEATURES:
+        out[feature] = pd.to_numeric(out[feature], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return out
 
 
 def add_text_embedding_features(
@@ -1600,6 +1751,14 @@ def main() -> int:
             args.text_embedding_components,
             args.text_max_features,
         )
+    if args.use_text_match_features:
+        features = add_text_match_features(
+            features,
+            sources,
+            args.text_match_max_features,
+            args.text_match_history_products,
+            args.text_match_recent_products,
+        )
     if args.use_category_embedding_features:
         features = add_category_embedding_features(features, sources, args.category_embedding_components)
     if args.use_event_category_features:
@@ -1608,6 +1767,7 @@ def main() -> int:
         args.use_response_priors,
         args.use_content_features,
         args.use_text_embedding_features,
+        args.use_text_match_features,
         args.use_category_embedding_features,
         args.use_event_category_features,
         args.use_derived_features,

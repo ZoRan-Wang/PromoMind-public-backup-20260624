@@ -34,6 +34,14 @@ def test_blend_weights_grid_includes_pure_heuristic_and_pure_xgb():
     assert weights == [0.0, 0.25, 0.5, 0.75, 1.0]
 
 
+def test_feature_columns_include_text_match_features_when_enabled():
+    columns = xgbr._feature_columns(use_text_match_features=True)
+
+    assert "text_match_max_similarity" in columns
+    assert "text_match_top3_similarity" in columns
+    assert "text_match_recent_max_similarity" in columns
+
+
 def test_blend_scores_respects_selected_xgb_weight():
     frame = pd.DataFrame(
         {
@@ -115,6 +123,24 @@ def test_tail_fusion_preserves_primary_head_and_fills_from_secondary():
         "secondary_tail",
         "secondary_tail",
     ]
+
+
+def test_tail_fusion_selection_profiles_choose_expected_keep():
+    search = pd.DataFrame(
+        {
+            "split": ["validation", "validation"],
+            "keep_primary_top": [7, 12],
+            "recall_at_10": [0.25, 0.20],
+            "ndcg_at_10": [0.30, 0.25],
+            "positive_event_hit_rate_at_10": [0.50, 0.45],
+            "recall_at_20": [0.31, 0.34],
+            "ndcg_at_20": [0.32, 0.35],
+            "positive_event_hit_rate_at_20": [0.60, 0.65],
+        }
+    )
+
+    assert tail_fusion.select_best_keep(search, "top10_ndcg", "recall_at_20") == 7
+    assert tail_fusion.select_best_keep(search, "tail_recall", "recall_at_20") == 12
 
 
 def test_select_ensemble_configs_uses_top_validation_rows():
@@ -289,6 +315,52 @@ def test_text_embedding_features_use_prior_product_text_history():
     assert apple_similarity > dog_similarity
     assert out["text_embedding_has_profile"].tolist() == [1.0, 1.0]
     assert out["text_embedding_history_count_log"].nunique() == 1
+
+
+def test_text_match_features_use_direct_prior_product_text_similarity():
+    features = pd.DataFrame(
+        {
+            "event_id": ["a", "a"],
+            "campaign_id": [1, 1],
+            "coupon_start_date": ["2026-01-10", "2026-01-10"],
+            "household_id": [5, 5],
+            "product_id": [101, 201],
+            "label": [0.0, 0.0],
+        }
+    )
+    sources = {
+        "products": pd.DataFrame(
+            {
+                "product_id": [100, 101, 200, 201],
+                "department": ["GROCERY", "GROCERY", "PET", "PET"],
+                "brand": ["Private", "Private", "National", "National"],
+                "product_category": ["APPLE SAUCE", "APPLE SAUCE", "DOG FOOD", "DOG FOOD"],
+                "product_type": ["APPLE CINNAMON CUP", "APPLE CINNAMON JAR", "DRY DOG CHICKEN", "DRY DOG BEEF"],
+                "package_size": ["4 OZ", "4 OZ", "5 LB", "5 LB"],
+            }
+        ),
+        "transactions": pd.DataFrame(
+            {
+                "household_id": [5, 5],
+                "product_id": [100, 200],
+                "transaction_timestamp": pd.to_datetime(["2026-01-01", "2026-01-11"]),
+            }
+        ),
+    }
+
+    out = xgbr.add_text_match_features(
+        features,
+        sources,
+        max_features=64,
+        history_products=10,
+        recent_products=5,
+    )
+
+    apple_similarity = out.loc[out["product_id"].eq(101), "text_match_max_similarity"].iloc[0]
+    dog_similarity = out.loc[out["product_id"].eq(201), "text_match_max_similarity"].iloc[0]
+    assert apple_similarity > dog_similarity
+    assert out["text_match_has_profile"].tolist() == [1.0, 1.0]
+    assert math.isclose(float(out["text_match_history_count_log"].iloc[0]), math.log1p(1.0))
 
 
 def test_category_embedding_features_capture_related_nonexact_categories():

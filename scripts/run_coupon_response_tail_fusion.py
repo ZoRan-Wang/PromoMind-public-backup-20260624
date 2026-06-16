@@ -45,6 +45,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--preserve-max-rank", type=int, default=15)
     parser.add_argument("--output-k", type=int, default=20)
     parser.add_argument("--primary-metric", default="recall_at_20")
+    parser.add_argument(
+        "--selection-profile",
+        choices=["tail_recall", "top10_ndcg"],
+        default="tail_recall",
+        help="Validation selection policy for the keep point.",
+    )
     return parser.parse_args()
 
 
@@ -133,6 +139,32 @@ def _evaluate_split(ranked: pd.DataFrame, truth: pd.DataFrame, split: str, eval_
     return metrics
 
 
+def select_best_keep(search: pd.DataFrame, profile: str, primary_metric: str) -> int:
+    """Select the fusion keep point from validation rows only."""
+
+    validation = search[search["split"].eq("validation")].copy()
+    if validation.empty:
+        raise RuntimeError("No validation rows are available for tail-fusion selection.")
+
+    if profile == "tail_recall":
+        sort_columns = [primary_metric, "ndcg_at_20", "positive_event_hit_rate_at_20", "keep_primary_top"]
+        ascending = [False, False, False, True]
+    elif profile == "top10_ndcg":
+        sort_columns = [
+            "ndcg_at_10",
+            "recall_at_10",
+            "positive_event_hit_rate_at_10",
+            "recall_at_20",
+            "ndcg_at_20",
+            "keep_primary_top",
+        ]
+        ascending = [False, False, False, False, False, True]
+    else:
+        raise ValueError(f"Unsupported selection profile: {profile}")
+
+    return int(validation.sort_values(sort_columns, ascending=ascending).iloc[0]["keep_primary_top"])
+
+
 def main() -> int:
     args = parse_args()
     args.outputs_dir.mkdir(parents=True, exist_ok=True)
@@ -156,15 +188,11 @@ def main() -> int:
             row["keep_primary_top"] = keep
             row["output_k"] = args.output_k
             row["primary_metric"] = args.primary_metric
+            row["selection_profile"] = args.selection_profile
             search_rows.append(row)
 
     search = pd.DataFrame(search_rows)
-    validation = search[search["split"].eq("validation")].copy()
-    best_validation = validation.sort_values(
-        [args.primary_metric, "ndcg_at_20", "keep_primary_top"],
-        ascending=[False, False, True],
-    ).iloc[0]
-    best_keep = int(best_validation["keep_primary_top"])
+    best_keep = select_best_keep(search, args.selection_profile, args.primary_metric)
     selected = fused_by_keep[best_keep]
 
     comparison_rows = []
@@ -177,6 +205,7 @@ def main() -> int:
                 "secondary_candidates": str(args.secondary_candidates),
                 "model_selection": "validation",
                 "primary_metric": args.primary_metric,
+                "selection_profile": args.selection_profile,
                 "keep_primary_top": best_keep,
                 "output_k": args.output_k,
             }
@@ -196,7 +225,7 @@ def main() -> int:
     comparison_parts.append(comparison)
     pd.concat(comparison_parts, ignore_index=True, sort=False).to_csv(final_path, index=False)
 
-    print(f"Selected keep_primary_top={best_keep} by validation {args.primary_metric}")
+    print(f"Selected keep_primary_top={best_keep} by validation profile={args.selection_profile}")
     print(f"Wrote {args.outputs_dir / 'candidates_coupon_response_tail_fusion.csv'} ({len(selected)} rows)")
     print(f"Wrote {args.outputs_dir / 'coupon_response_tail_fusion_search.csv'} ({len(search)} rows)")
     print(f"Wrote {args.outputs_dir / 'coupon_response_tail_fusion_model_comparison.csv'} ({len(comparison)} rows)")
