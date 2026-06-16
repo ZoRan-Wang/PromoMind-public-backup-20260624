@@ -168,7 +168,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--search-rank-fusion", action="store_true", help="Tune validation-selected rank fusion over XGBoost and heuristic ranks.")
     parser.add_argument(
         "--label-scheme",
-        choices=["binary", "pull_forward_timing", "pull_forward_interval", "expected_lead_timing"],
+        choices=[
+            "binary",
+            "pull_forward_timing",
+            "pull_forward_interval",
+            "pull_forward_interval_new_high",
+            "expected_lead_timing",
+        ],
         default="binary",
         help="Training label scheme. Use pull_forward_interval or expected_lead_timing for graded timing relevance.",
     )
@@ -244,11 +250,16 @@ def apply_label_scheme(
 
     if scheme == "binary":
         return features
-    if scheme not in {"pull_forward_timing", "pull_forward_interval", "expected_lead_timing"}:
+    if scheme not in {
+        "pull_forward_timing",
+        "pull_forward_interval",
+        "pull_forward_interval_new_high",
+        "expected_lead_timing",
+    }:
         raise ValueError(f"Unsupported label scheme: {scheme}")
     if scheme == "pull_forward_timing" and not (0.0 <= early_end_days < middle_end_days <= 5.0):
         raise ValueError("Timing grade boundaries must satisfy 0 <= early < middle <= 5 days.")
-    if scheme == "pull_forward_interval" and pull_forward_min_days > pull_forward_max_days:
+    if scheme in {"pull_forward_interval", "pull_forward_interval_new_high"} and pull_forward_min_days > pull_forward_max_days:
         raise ValueError("Pull-forward boundaries must satisfy min <= max days.")
     if scheme == "expected_lead_timing" and expected_lead_min_days > expected_lead_max_days:
         raise ValueError("Expected-lead boundaries must satisfy min <= max days.")
@@ -277,13 +288,17 @@ def apply_label_scheme(
         middle = positive & (days_after_coupon.to_numpy() > early_end_days) & (
             days_after_coupon.to_numpy() <= middle_end_days
         )
-    elif scheme == "pull_forward_interval":
+    elif scheme in {"pull_forward_interval", "pull_forward_interval_new_high"}:
         actual_interval = out["days_since_last"].to_numpy(dtype=float) + days_after_coupon.to_numpy(dtype=float)
         pull_forward_days = out["median_interval_days"].to_numpy(dtype=float) - actual_interval
         finite = np.isfinite(actual_interval) & np.isfinite(pull_forward_days)
         middle = positive & finite & (pull_forward_days >= pull_forward_min_days) & (
             pull_forward_days <= pull_forward_max_days
         )
+        if scheme == "pull_forward_interval_new_high":
+            user_product_count = out["user_product_count"].to_numpy(dtype=float)
+            new_to_household = positive & (~np.isfinite(user_product_count) | (user_product_count <= 0.0))
+            middle = middle | new_to_household
     else:
         expected_lead_days = out["median_interval_days"].to_numpy(dtype=float) - out["days_since_last"].to_numpy(dtype=float)
         finite = np.isfinite(expected_lead_days)

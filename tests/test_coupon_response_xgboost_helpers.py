@@ -12,6 +12,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import run_coupon_response_xgboost_ranker as xgbr  # noqa: E402
+import run_coupon_response_tail_fusion as tail_fusion  # noqa: E402
 
 
 def test_normalize_scores_by_event_is_group_local():
@@ -86,6 +87,36 @@ def test_rank_fusion_scores_can_combine_xgb_and_heuristic_ranks():
     assert np.allclose(scores, [0.5 / 11.0 + 0.5 / 12.0, 0.5 / 12.0 + 0.5 / 11.0])
 
 
+def test_tail_fusion_preserves_primary_head_and_fills_from_secondary():
+    primary = pd.DataFrame(
+        {
+            "event_id": ["a", "a", "a", "a"],
+            "split": ["test"] * 4,
+            "product_id": [1, 2, 3, 4],
+            "rank": [1, 2, 3, 4],
+        }
+    )
+    secondary = pd.DataFrame(
+        {
+            "event_id": ["a", "a", "a", "a"],
+            "split": ["test"] * 4,
+            "product_id": [3, 5, 2, 6],
+            "rank": [1, 2, 3, 4],
+        }
+    )
+
+    fused = tail_fusion.fuse_rankings(primary, secondary, keep_primary_top=2, output_k=4)
+
+    assert fused["product_id"].tolist() == [1, 2, 3, 5]
+    assert fused["rank"].tolist() == [1, 2, 3, 4]
+    assert fused["fusion_source"].tolist() == [
+        "primary_head",
+        "primary_head",
+        "secondary_tail",
+        "secondary_tail",
+    ]
+
+
 def test_select_ensemble_configs_uses_top_validation_rows():
     search = pd.DataFrame(
         {
@@ -157,6 +188,37 @@ def test_pull_forward_interval_labels_use_repurchase_cadence_window():
     )
 
     assert out["label"].tolist() == [3.0, 2.0, 2.0, 0.0]
+
+
+def test_pull_forward_interval_new_high_labels_nonrepeat_purchases_high():
+    features = pd.DataFrame(
+        {
+            "event_id": ["a", "a", "a", "a"],
+            "product_id": [1, 2, 3, 4],
+            "coupon_start_date": ["2026-01-10"] * 4,
+            "days_since_last": [8.0, np.nan, 9.0, 8.0],
+            "median_interval_days": [10.0, np.nan, 10.0, 10.0],
+            "user_product_count": [2.0, 0.0, 3.0, 0.0],
+            "label": [1.0, 1.0, 1.0, 0.0],
+        }
+    )
+    truth = pd.DataFrame(
+        {
+            "event_id": ["a", "a", "a"],
+            "product_id": [1, 2, 3],
+            "observed_purchase_time": ["2026-01-11", "2026-01-11", "2026-01-13"],
+        }
+    )
+
+    out = xgbr.apply_label_scheme(
+        features,
+        truth,
+        "pull_forward_interval_new_high",
+        pull_forward_min_days=-1.0,
+        pull_forward_max_days=2.0,
+    )
+
+    assert out["label"].tolist() == [3.0, 3.0, 2.0, 0.0]
 
 
 def test_expected_lead_timing_labels_prefer_one_to_two_day_coupon_lead():
