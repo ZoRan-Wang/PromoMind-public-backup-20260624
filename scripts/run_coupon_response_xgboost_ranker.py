@@ -27,6 +27,14 @@ import run_coupon_response_ranker as base  # noqa: E402
 from promomind.data import schema  # noqa: E402
 
 MODEL_NAME = "coupon_response_xgboost_ranker"
+NO_RANK_FUSION = {
+    "rank_fusion_method": "none",
+    "rank_fusion_c": 0.0,
+    "rank_fusion_xgb_weight": 1.0,
+    "rank_fusion_heuristic_weight": 0.0,
+    "rank_fusion_base_weight": 0.0,
+    "rank_fusion_global_weight": 0.0,
+}
 HEURISTIC_BLEND_WEIGHTS = {
     "repeat_signal": 0.45,
     "cadence_signal": 0.25,
@@ -126,6 +134,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--search-objectives", action="store_true", help="Also search rank:pairwise/rank:map objectives.")
     parser.add_argument("--search-score-blend", action="store_true", help="Tune a validation-selected blend of XGBoost and repeat-cadence scores.")
     parser.add_argument("--blend-step", type=float, default=0.05, help="Grid step for --search-score-blend.")
+    parser.add_argument("--search-rank-fusion", action="store_true", help="Tune validation-selected rank fusion over XGBoost and heuristic ranks.")
     parser.add_argument("--primary-metric", default="recall_at_20")
     parser.add_argument("--selection-tolerance", type=float, default=0.001)
     parser.add_argument("--use-response-priors", action="store_true", help="Add train-period product/category response priors.")
@@ -240,6 +249,106 @@ def _select_blend_weight(
     if best_metrics is None:
         best_metrics = {}
     return best_weight, best_metrics
+
+
+def _rank_array_by_event(frame: pd.DataFrame, scores) -> np.ndarray:
+    ranked = frame[[base.EVENT_COL]].copy()
+    ranked["_score"] = np.asarray(scores, dtype=np.float32)
+    return ranked.groupby(base.EVENT_COL)["_score"].rank(method="first", ascending=False).to_numpy(dtype=np.float32)
+
+
+def _rank_fusion_configs(enabled: bool) -> list[dict[str, float | str]]:
+    if not enabled:
+        return [NO_RANK_FUSION.copy()]
+
+    configs: list[dict[str, float | str]] = []
+    methods = [("rrf", 60.0), ("rrf", 100.0), ("exp", 30.0)]
+    weight_sets = [
+        (0.9, 0.1, 0.0, 0.0),
+        (0.8, 0.2, 0.0, 0.0),
+        (0.7, 0.3, 0.0, 0.0),
+        (0.7, 0.2, 0.0, 0.1),
+        (0.6, 0.3, 0.1, 0.0),
+    ]
+    for method, c_value in methods:
+        for xgb_weight, heuristic_weight, base_weight, global_weight in weight_sets:
+            configs.append(
+                {
+                    "rank_fusion_method": method,
+                    "rank_fusion_c": c_value,
+                    "rank_fusion_xgb_weight": xgb_weight,
+                    "rank_fusion_heuristic_weight": heuristic_weight,
+                    "rank_fusion_base_weight": base_weight,
+                    "rank_fusion_global_weight": global_weight,
+                }
+            )
+    return configs
+
+
+def _rank_fusion_scores(
+    frame: pd.DataFrame,
+    xgb_scores,
+    heuristic_scores,
+    config: dict[str, float | str],
+) -> np.ndarray:
+    method = str(config.get("rank_fusion_method", "none"))
+    if method == "none":
+        return np.asarray(xgb_scores, dtype=np.float32)
+
+    rank_sources = {
+        "xgb": _rank_array_by_event(frame, xgb_scores),
+        "heuristic": _rank_array_by_event(frame, heuristic_scores),
+        "base": _rank_array_by_event(frame, frame["base_signal"].to_numpy(dtype=np.float32)),
+        "global": _rank_array_by_event(frame, frame["global_signal"].to_numpy(dtype=np.float32)),
+    }
+    weights = {
+        "xgb": float(config.get("rank_fusion_xgb_weight", 0.0)),
+        "heuristic": float(config.get("rank_fusion_heuristic_weight", 0.0)),
+        "base": float(config.get("rank_fusion_base_weight", 0.0)),
+        "global": float(config.get("rank_fusion_global_weight", 0.0)),
+    }
+    c_value = max(float(config.get("rank_fusion_c", 60.0)), 1e-6)
+    scores = np.zeros(len(frame), dtype=np.float32)
+    for source, ranks in rank_sources.items():
+        weight = weights[source]
+        if weight == 0.0:
+            continue
+        if method == "rrf":
+            scores += weight / (c_value + ranks)
+        elif method == "exp":
+            scores += weight * np.exp(-(ranks - 1.0) / c_value)
+        else:
+            raise ValueError(f"Unsupported rank fusion method: {method}")
+    return scores
+
+
+def _select_rank_fusion(
+    frame: pd.DataFrame,
+    xgb_scores,
+    heuristic_scores,
+    val_events: pd.DataFrame,
+    val_truth: pd.DataFrame,
+    eval_ks: list[int],
+    primary_metric: str,
+    fusion_configs: list[dict[str, float | str]],
+) -> tuple[dict[str, float | str], dict[str, float]]:
+    best_config = NO_RANK_FUSION.copy()
+    best_metrics: dict[str, float] | None = None
+    for config in fusion_configs:
+        fused_scores = _rank_fusion_scores(frame, xgb_scores, heuristic_scores, config)
+        ranked = _rank_scores(frame, fused_scores, max(eval_ks))
+        metrics = base.evaluate_ranked(ranked, val_truth, val_events, eval_ks)
+        metric_value = float(metrics.get(primary_metric, 0.0))
+        best_value = float(best_metrics.get(primary_metric, 0.0)) if best_metrics else -np.inf
+        if (metric_value > best_value) or (
+            math.isclose(metric_value, best_value, abs_tol=1e-12)
+            and float(config.get("rank_fusion_xgb_weight", 0.0)) > float(best_config.get("rank_fusion_xgb_weight", 0.0))
+        ):
+            best_config = config.copy()
+            best_metrics = metrics
+    if best_metrics is None:
+        best_metrics = {}
+    return best_config, best_metrics
 
 
 def _xgb_device(requested: str) -> str:
@@ -879,22 +988,38 @@ def _evaluate_config(
     eval_ks: list[int],
     primary_metric: str,
     blend_weights: list[float],
+    rank_fusion_configs: list[dict[str, float | str]],
 ) -> tuple[object, dict[str, float]]:
     ranker = _fit_ranker(xgb, config, device, seed, train_x, train_y, train_groups)
     val_scores = ranker.predict(val_x)
-    blend_weight, metrics = _select_blend_weight(
-        val_ordered,
-        val_scores,
-        val_heuristic_scores,
-        val_events,
-        val_truth,
-        eval_ks,
-        primary_metric,
-        blend_weights,
-    )
+    rank_fusion_config = NO_RANK_FUSION.copy()
+    if rank_fusion_configs and str(rank_fusion_configs[0].get("rank_fusion_method", "none")) != "none":
+        rank_fusion_config, metrics = _select_rank_fusion(
+            val_ordered,
+            val_scores,
+            val_heuristic_scores,
+            val_events,
+            val_truth,
+            eval_ks,
+            primary_metric,
+            rank_fusion_configs,
+        )
+        blend_weight = 1.0
+    else:
+        blend_weight, metrics = _select_blend_weight(
+            val_ordered,
+            val_scores,
+            val_heuristic_scores,
+            val_events,
+            val_truth,
+            eval_ks,
+            primary_metric,
+            blend_weights,
+        )
     row = {"model_name": MODEL_NAME, "split": "validation", "device": device}
     row.update(config)
     row["xgb_blend_weight"] = blend_weight
+    row.update(rank_fusion_config)
     row.update(metrics)
     return ranker, row
 
@@ -915,6 +1040,8 @@ def main() -> int:
     args.outputs_dir.mkdir(parents=True, exist_ok=True)
     eval_ks = sorted(set(args.eval_k))
     max_k = max(eval_ks)
+    if args.search_score_blend and args.search_rank_fusion:
+        raise ValueError("Use either --search-score-blend or --search-rank-fusion, not both.")
 
     try:
         import xgboost as xgb
@@ -960,6 +1087,7 @@ def main() -> int:
     val_heuristic_scores = _heuristic_scores(val_ordered, device)
     test_heuristic_scores = _heuristic_scores(test_ordered, device)
     blend_weights = _candidate_blend_weights(args.search_score_blend, args.blend_step)
+    rank_fusion_configs = _rank_fusion_configs(args.search_rank_fusion)
 
     val_events = events[events["split"] == "validation"].copy()
     test_events = events[events["split"] == "test"].copy()
@@ -987,6 +1115,7 @@ def main() -> int:
             eval_ks,
             args.primary_metric,
             blend_weights,
+            rank_fusion_configs,
         )
         search_rows.append(row)
 
@@ -1016,11 +1145,22 @@ def main() -> int:
         ]
     }
     best_blend_weight = float(best_row.get("xgb_blend_weight", 1.0))
+    best_rank_fusion_config = {
+        "rank_fusion_method": best_row.get("rank_fusion_method", "none"),
+        "rank_fusion_c": float(best_row.get("rank_fusion_c", 0.0)),
+        "rank_fusion_xgb_weight": float(best_row.get("rank_fusion_xgb_weight", 1.0)),
+        "rank_fusion_heuristic_weight": float(best_row.get("rank_fusion_heuristic_weight", 0.0)),
+        "rank_fusion_base_weight": float(best_row.get("rank_fusion_base_weight", 0.0)),
+        "rank_fusion_global_weight": float(best_row.get("rank_fusion_global_weight", 0.0)),
+    }
     best_train = _filter_positive_event_groups(train, bool(best_config.get("positive_train_events_only", False)))
     train_x, train_y, train_groups, _ = _grouped_xy(best_train, feature_columns)
     best_ranker = _fit_ranker(xgb, best_config, device, args.seed, train_x, train_y, train_groups)
     val_scores = best_ranker.predict(val_x)
-    val_final_scores = _blend_scores(val_ordered, val_scores, val_heuristic_scores, best_blend_weight)
+    if str(best_rank_fusion_config.get("rank_fusion_method", "none")) != "none":
+        val_final_scores = _rank_fusion_scores(val_ordered, val_scores, val_heuristic_scores, best_rank_fusion_config)
+    else:
+        val_final_scores = _blend_scores(val_ordered, val_scores, val_heuristic_scores, best_blend_weight)
     val_ranked = _rank_scores(val_ordered, val_final_scores, max_k)
 
     final_train = pd.concat([train, validation], ignore_index=True)
@@ -1028,7 +1168,10 @@ def main() -> int:
     final_train_x, final_train_y, final_train_groups, _ = _grouped_xy(final_train, feature_columns)
     final_ranker = _fit_ranker(xgb, best_config, device, args.seed, final_train_x, final_train_y, final_train_groups)
     test_scores = final_ranker.predict(test_x)
-    test_final_scores = _blend_scores(test_ordered, test_scores, test_heuristic_scores, best_blend_weight)
+    if str(best_rank_fusion_config.get("rank_fusion_method", "none")) != "none":
+        test_final_scores = _rank_fusion_scores(test_ordered, test_scores, test_heuristic_scores, best_rank_fusion_config)
+    else:
+        test_final_scores = _blend_scores(test_ordered, test_scores, test_heuristic_scores, best_blend_weight)
     test_ranked = _rank_scores(test_ordered, test_final_scores, max_k)
 
     comparison_rows = []
@@ -1046,6 +1189,7 @@ def main() -> int:
             "selection_tolerance": args.selection_tolerance if args.search else 0.0,
             "xgb_blend_weight": best_blend_weight,
         }
+        row.update(best_rank_fusion_config)
         row.update(best_config)
         row.update(base.evaluate_ranked(ranked, split_truth, split_events, eval_ks))
         comparison_rows.append(row)

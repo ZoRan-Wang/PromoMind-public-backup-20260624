@@ -52,6 +52,40 @@ def test_blend_scores_respects_selected_xgb_weight():
     assert math.isclose(float(blended[1]), 0.25)
 
 
+def test_rank_fusion_configs_are_disabled_by_default():
+    configs = xgbr._rank_fusion_configs(enabled=False)
+
+    assert configs == [xgbr.NO_RANK_FUSION]
+
+
+def test_rank_fusion_scores_can_combine_xgb_and_heuristic_ranks():
+    frame = pd.DataFrame(
+        {
+            "event_id": ["a", "a"],
+            "product_id": [1, 2],
+            "base_signal": [0.0, 0.0],
+            "global_signal": [0.0, 0.0],
+        }
+    )
+    config = {
+        "rank_fusion_method": "rrf",
+        "rank_fusion_c": 10.0,
+        "rank_fusion_xgb_weight": 0.5,
+        "rank_fusion_heuristic_weight": 0.5,
+        "rank_fusion_base_weight": 0.0,
+        "rank_fusion_global_weight": 0.0,
+    }
+
+    scores = xgbr._rank_fusion_scores(
+        frame,
+        xgb_scores=[1.0, 0.0],
+        heuristic_scores=[0.0, 1.0],
+        config=config,
+    )
+
+    assert np.allclose(scores, [0.5 / 11.0 + 0.5 / 12.0, 0.5 / 12.0 + 0.5 / 11.0])
+
+
 def test_coupon_family_features_use_prior_same_coupon_upc_history():
     features = pd.DataFrame(
         {

@@ -125,6 +125,7 @@ Additional validation-search options are available:
 ```bash
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --wide-search --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-score-blend --primary-metric recall_at_20
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-rank-fusion --primary-metric ndcg_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --wide-search --use-value-features --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --use-coupon-family-features --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --use-redemption-features --primary-metric recall_at_20
@@ -142,10 +143,13 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 | Coupon-family features | 0.4002 | 0.3183 | 0.4954 | 0.4968 | 0.3472 |
 | Redemption features | 0.4105 | 0.3255 | 0.5321 | 0.5058 | 0.3539 |
 | Validation score blend | 0.3945 | 0.3079 | 0.5046 | 0.5155 | 0.3442 |
+| Rank fusion, selected on NDCG@20 | 0.4103 | 0.3188 | 0.5321 | 0.5215 | 0.3505 |
 
 `--use-coupon-family-features` treats all products attached to the same campaign coupon UPC as a coupon family and measures household history with that family before the campaign starts. The features were non-zero and used by XGBoost, but they did not generalize to the held-out campaigns.
 
 `--use-redemption-features` adds prior coupon redemption count, prior same-coupon-UPC redemption, and prior product/category redemption signals. The features are leakage-safe because only redemption dates before the campaign start are used. They were too sparse to improve held-out NDCG@10.
+
+`--search-rank-fusion` tunes reciprocal-rank or exponential-rank fusion over XGBoost and repeat-cadence ranks. It can improve broader Recall@20, but the held-out NDCG@10 and NDCG@20 tradeoff is worse than the default XGBoost LTR model.
 
 An optional historical response-prior feature set is available through:
 
@@ -195,6 +199,7 @@ A pointwise XGBoost classifier was also checked as a negative ablation. The best
 | XGBoost plus coupon-family features | Optional ablation | Used by the model, but lower held-out NDCG@10 |
 | XGBoost plus redemption features | Optional ablation | Leakage-safe but too sparse to move the main metric |
 | XGBoost plus heuristic score blend | Negative ablation | Validation improved but held-out test worsened |
+| XGBoost plus rank fusion | Negative ablation | Better Recall@20 in one setting, worse held-out NDCG@10/NDCG@20 |
 | Campaign-type expert models | Negative ablation | Improved Recall@20 slightly, but hurt NDCG@10 |
 | Type-A filtering and Type-B validation | Negative ablation | Did not beat the default held-out NDCG@10 or Hit@10 |
 | LightGBM LambdaRank | Negative ablation | Best checked variant reached about 0.3225 held-out NDCG@10, below XGBoost |
