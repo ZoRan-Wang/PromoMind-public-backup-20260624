@@ -86,6 +86,27 @@ def test_rank_fusion_scores_can_combine_xgb_and_heuristic_ranks():
     assert np.allclose(scores, [0.5 / 11.0 + 0.5 / 12.0, 0.5 / 12.0 + 0.5 / 11.0])
 
 
+def test_select_ensemble_configs_uses_top_validation_rows():
+    search = pd.DataFrame(
+        {
+            "n_estimators": [120, 180, 250],
+            "learning_rate": [0.03, 0.03, 0.03],
+            "max_depth": [2, 2, 2],
+            "objective": ["rank:ndcg", "rank:ndcg", "rank:ndcg"],
+            "positive_train_events_only": [False, False, False],
+            "subsample": [0.9, 0.9, 0.9],
+            "colsample_bytree": [0.9, 0.9, 0.9],
+            "recall_at_20": [0.30, 0.32, 0.31],
+            "ndcg_at_10": [0.20, 0.19, 0.25],
+            "recall_at_10": [0.10, 0.20, 0.15],
+        }
+    )
+
+    configs = xgbr._select_ensemble_configs(search, "recall_at_20", 2)
+
+    assert [config["n_estimators"] for config in configs] == [180, 250]
+
+
 def test_pull_forward_timing_labels_grade_middle_highest():
     features = pd.DataFrame(
         {
@@ -166,6 +187,46 @@ def test_expected_lead_timing_labels_prefer_one_to_two_day_coupon_lead():
     )
 
     assert out["label"].tolist() == [3.0, 2.0, 2.0, 0.0]
+
+
+def test_text_embedding_features_use_prior_product_text_history():
+    features = pd.DataFrame(
+        {
+            "event_id": ["a", "a"],
+            "campaign_id": [1, 1],
+            "coupon_start_date": ["2026-01-10", "2026-01-10"],
+            "household_id": [5, 5],
+            "product_id": [101, 201],
+            "label": [0.0, 0.0],
+        }
+    )
+    sources = {
+        "products": pd.DataFrame(
+            {
+                "product_id": [100, 101, 200, 201],
+                "department": ["GROCERY", "GROCERY", "PET", "PET"],
+                "brand": ["Private", "Private", "National", "National"],
+                "product_category": ["APPLE SAUCE", "APPLE SAUCE", "DOG FOOD", "DOG FOOD"],
+                "product_type": ["APPLE CINNAMON CUP", "APPLE CINNAMON JAR", "DRY DOG CHICKEN", "DRY DOG BEEF"],
+                "package_size": ["4 OZ", "4 OZ", "5 LB", "5 LB"],
+            }
+        ),
+        "transactions": pd.DataFrame(
+            {
+                "household_id": [5, 5],
+                "product_id": [100, 200],
+                "transaction_timestamp": pd.to_datetime(["2026-01-01", "2026-01-11"]),
+            }
+        ),
+    }
+
+    out = xgbr.add_text_embedding_features(features, sources, components=2, max_features=64)
+
+    apple_similarity = out.loc[out["product_id"].eq(101), "text_embedding_similarity"].iloc[0]
+    dog_similarity = out.loc[out["product_id"].eq(201), "text_embedding_similarity"].iloc[0]
+    assert apple_similarity > dog_similarity
+    assert out["text_embedding_has_profile"].tolist() == [1.0, 1.0]
+    assert out["text_embedding_history_count_log"].nunique() == 1
 
 
 def test_coupon_family_features_use_prior_same_coupon_upc_history():

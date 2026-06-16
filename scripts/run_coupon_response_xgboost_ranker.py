@@ -74,6 +74,12 @@ XGB_CONTENT_FEATURES = [
     "product_type_affinity",
     "content_match_signal",
 ]
+XGB_TEXT_EMBEDDING_FEATURES = [
+    "text_embedding_similarity",
+    "text_embedding_profile_norm",
+    "text_embedding_history_count_log",
+    "text_embedding_has_profile",
+]
 XGB_VALUE_FEATURES = [
     "product_spend_signal",
     "product_avg_sales_log",
@@ -134,6 +140,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--search", action="store_true", help="Tune XGBoost configs on validation before final test.")
     parser.add_argument("--wide-search", action="store_true", help="Search a wider XGBoost grid on validation.")
     parser.add_argument("--search-objectives", action="store_true", help="Also search rank:pairwise/rank:map objectives.")
+    parser.add_argument("--ensemble-top-n", type=int, default=1, help="Average the top-N validation-selected XGBoost rankers.")
     parser.add_argument("--search-score-blend", action="store_true", help="Tune a validation-selected blend of XGBoost and repeat-cadence scores.")
     parser.add_argument("--blend-step", type=float, default=0.05, help="Grid step for --search-score-blend.")
     parser.add_argument("--search-rank-fusion", action="store_true", help="Tune validation-selected rank fusion over XGBoost and heuristic ranks.")
@@ -153,6 +160,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--selection-tolerance", type=float, default=0.001)
     parser.add_argument("--use-response-priors", action="store_true", help="Add train-period product/category response priors.")
     parser.add_argument("--use-content-features", action="store_true", help="Add product metadata affinity features.")
+    parser.add_argument("--use-text-embedding-features", action="store_true", help="Add TF-IDF/SVD product-text profile features.")
+    parser.add_argument("--text-embedding-components", type=int, default=32)
+    parser.add_argument("--text-max-features", type=int, default=4096)
     parser.add_argument("--use-derived-features", action="store_true", help="Add event-relative rank and interaction features.")
     parser.add_argument("--use-value-features", action="store_true", help="Add historical price, spend, and discount-sensitivity features.")
     parser.add_argument("--use-coupon-family-features", action="store_true", help="Add campaign coupon-UPC family repeat features.")
@@ -164,6 +174,7 @@ def parse_args() -> argparse.Namespace:
 def _feature_columns(
     use_response_priors: bool = False,
     use_content_features: bool = False,
+    use_text_embedding_features: bool = False,
     use_derived_features: bool = False,
     use_value_features: bool = False,
     use_coupon_family_features: bool = False,
@@ -182,6 +193,8 @@ def _feature_columns(
         columns.extend(XGB_EXTRA_FEATURES)
     if use_content_features:
         columns.extend(XGB_CONTENT_FEATURES)
+    if use_text_embedding_features:
+        columns.extend(XGB_TEXT_EMBEDDING_FEATURES)
     return columns
 
 
@@ -595,6 +608,128 @@ def add_content_affinity_features(features: pd.DataFrame, sources: dict[str, pd.
         ["department_affinity", "brand_affinity", "category_affinity_exact", "product_type_affinity"]
     ].max(axis=1)
     for feature in XGB_CONTENT_FEATURES:
+        out[feature] = pd.to_numeric(out[feature], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return out
+
+
+def _build_product_text(products: pd.DataFrame) -> pd.Series:
+    text_columns = ["department", "product_category", "product_type", "brand", "package_size"]
+    parts = []
+    for column in text_columns:
+        parts.append(_clean_text_column(products, column).str.replace("UNKNOWN", "", regex=False))
+    return pd.concat(parts, axis=1).agg(" ".join, axis=1).str.replace(r"\s+", " ", regex=True).str.strip()
+
+
+def _product_text_embeddings(
+    products: pd.DataFrame,
+    components: int,
+    max_features: int,
+) -> tuple[pd.DataFrame, list[str]]:
+    if components < 1:
+        raise ValueError("--text-embedding-components must be >= 1.")
+    if max_features < 10:
+        raise ValueError("--text-max-features must be >= 10.")
+
+    try:
+        from sklearn.decomposition import TruncatedSVD
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.preprocessing import normalize
+    except Exception as exc:
+        raise RuntimeError("scikit-learn is required for --use-text-embedding-features.") from exc
+
+    text_columns = ["department", "brand", "product_category", "product_type", "package_size"]
+    available_columns = [column for column in text_columns if column in products.columns]
+    product_meta = products[[schema.PRODUCT_ID, *available_columns]].drop_duplicates(schema.PRODUCT_ID).copy()
+    for column in text_columns:
+        if column not in product_meta.columns:
+            product_meta[column] = "UNKNOWN"
+    product_text = _build_product_text(product_meta).replace("", "unknown product")
+    vectorizer = TfidfVectorizer(
+        max_features=max_features,
+        min_df=2 if len(product_meta) >= 50 else 1,
+        ngram_range=(1, 2),
+        token_pattern=r"(?u)\b[\w/&:-]+\b",
+        lowercase=True,
+    )
+    tfidf = vectorizer.fit_transform(product_text)
+    if tfidf.shape[1] == 0:
+        embedding = np.zeros((len(product_meta), 1), dtype=np.float32)
+    elif min(tfidf.shape) <= 1:
+        embedding = normalize(tfidf, norm="l2", copy=True).toarray().astype(np.float32)
+    else:
+        n_components = min(int(components), max(1, min(tfidf.shape) - 1))
+        embedding = TruncatedSVD(n_components=n_components, random_state=42).fit_transform(tfidf).astype(np.float32)
+        embedding = normalize(embedding, norm="l2", copy=False).astype(np.float32)
+
+    columns = [f"text_emb_{idx}" for idx in range(embedding.shape[1])]
+    embeddings = pd.DataFrame(embedding, columns=columns)
+    embeddings.insert(0, schema.PRODUCT_ID, product_meta[schema.PRODUCT_ID].astype(int).to_numpy())
+    return embeddings, columns
+
+
+def add_text_embedding_features(
+    features: pd.DataFrame,
+    sources: dict[str, pd.DataFrame],
+    components: int = 32,
+    max_features: int = 4096,
+) -> pd.DataFrame:
+    """Add product-text profile features from leakage-safe household history."""
+
+    out = features.copy()
+    for feature in XGB_TEXT_EMBEDDING_FEATURES:
+        out[feature] = 0.0
+
+    embeddings, embedding_columns = _product_text_embeddings(sources["products"], components, max_features)
+    product_embedding_columns = [f"product_{column}" for column in embedding_columns]
+    profile_embedding_columns = [f"profile_{column}" for column in embedding_columns]
+
+    product_embeddings = embeddings.rename(
+        columns={column: f"product_{column}" for column in embedding_columns}
+    )
+    transaction_embeddings = embeddings.rename(
+        columns={column: f"profile_{column}" for column in embedding_columns}
+    )
+    transactions = sources["transactions"][
+        [schema.HOUSEHOLD_ID, schema.PRODUCT_ID, "transaction_timestamp"]
+    ].copy()
+    transactions = transactions.merge(transaction_embeddings, on=schema.PRODUCT_ID, how="left")
+    for column in profile_embedding_columns:
+        transactions[column] = pd.to_numeric(transactions[column], errors="coerce").fillna(0.0)
+
+    for campaign_id, index in out.groupby("campaign_id", sort=True).groups.items():
+        group = out.loc[index]
+        start = pd.Timestamp(group["coupon_start_date"].iloc[0])
+        households = set(group[schema.HOUSEHOLD_ID].astype(int))
+        history = transactions[
+            transactions[schema.HOUSEHOLD_ID].astype(int).isin(households)
+            & (transactions["transaction_timestamp"] < start)
+        ].copy()
+        if history.empty:
+            continue
+
+        profile = history.groupby(schema.HOUSEHOLD_ID)[profile_embedding_columns].mean().reset_index()
+        counts = history.groupby(schema.HOUSEHOLD_ID).size().rename("text_embedding_history_count").reset_index()
+        profile = profile.merge(counts, on=schema.HOUSEHOLD_ID, how="left")
+        update = group[[schema.HOUSEHOLD_ID, schema.PRODUCT_ID]].merge(profile, on=schema.HOUSEHOLD_ID, how="left")
+        update = update.merge(product_embeddings, on=schema.PRODUCT_ID, how="left")
+
+        profile_matrix = update[profile_embedding_columns].fillna(0.0).to_numpy(dtype=np.float32)
+        product_matrix = update[product_embedding_columns].fillna(0.0).to_numpy(dtype=np.float32)
+        profile_norm = np.linalg.norm(profile_matrix, axis=1)
+        product_norm = np.linalg.norm(product_matrix, axis=1)
+        denominator = np.maximum(profile_norm * product_norm, 1e-6)
+        similarity = np.sum(profile_matrix * product_matrix, axis=1) / denominator
+        history_count = pd.to_numeric(
+            update["text_embedding_history_count"],
+            errors="coerce",
+        ).fillna(0.0).to_numpy(dtype=np.float32)
+
+        out.loc[index, "text_embedding_similarity"] = np.clip(similarity, -1.0, 1.0)
+        out.loc[index, "text_embedding_profile_norm"] = profile_norm
+        out.loc[index, "text_embedding_history_count_log"] = np.log1p(history_count)
+        out.loc[index, "text_embedding_has_profile"] = (history_count > 0).astype(np.float32)
+
+    for feature in XGB_TEXT_EMBEDDING_FEATURES:
         out[feature] = pd.to_numeric(out[feature], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
     return out
 
@@ -1052,6 +1187,55 @@ def _fit_ranker(xgb, config: dict[str, float | int | str | bool], device: str, s
     return ranker
 
 
+def _config_from_row(row: dict[str, object]) -> dict[str, float | int | str | bool]:
+    return {
+        "n_estimators": int(row["n_estimators"]),
+        "learning_rate": float(row["learning_rate"]),
+        "max_depth": int(row["max_depth"]),
+        "objective": str(row["objective"]),
+        "positive_train_events_only": bool(row["positive_train_events_only"]),
+        "subsample": float(row["subsample"]),
+        "colsample_bytree": float(row["colsample_bytree"]),
+    }
+
+
+def _select_ensemble_configs(
+    search_frame: pd.DataFrame,
+    primary_metric: str,
+    ensemble_top_n: int,
+) -> list[dict[str, float | int | str | bool]]:
+    if ensemble_top_n < 1:
+        raise ValueError("--ensemble-top-n must be >= 1.")
+    ordered = search_frame.sort_values(
+        [primary_metric, "ndcg_at_10", "recall_at_10", "max_depth", "n_estimators"],
+        ascending=[False, False, False, True, True],
+    )
+    return [_config_from_row(row) for row in ordered.head(ensemble_top_n).to_dict("records")]
+
+
+def _average_ranker_scores(
+    xgb,
+    configs: list[dict[str, float | int | str | bool]],
+    device: str,
+    seed: int,
+    train_frame: pd.DataFrame,
+    feature_columns: list[str],
+    score_x: pd.DataFrame,
+    score_ordered: pd.DataFrame,
+) -> tuple[np.ndarray, list[object]]:
+    scores = []
+    rankers = []
+    for config_index, config in enumerate(configs):
+        config_train = _filter_positive_event_groups(train_frame, bool(config.get("positive_train_events_only", False)))
+        train_x, train_y, train_groups, _ = _grouped_xy(config_train, feature_columns)
+        ranker = _fit_ranker(xgb, config, device, seed + config_index, train_x, train_y, train_groups)
+        rankers.append(ranker)
+        scores.append(_normalize_scores_by_event(score_ordered, ranker.predict(score_x)))
+    if not scores:
+        return np.zeros(len(score_ordered), dtype=np.float32), rankers
+    return np.mean(np.vstack(scores), axis=0).astype(np.float32), rankers
+
+
 def _evaluate_config(
     xgb,
     config: dict[str, float | int | str | bool],
@@ -1122,6 +1306,10 @@ def main() -> int:
     max_k = max(eval_ks)
     if args.search_score_blend and args.search_rank_fusion:
         raise ValueError("Use either --search-score-blend or --search-rank-fusion, not both.")
+    if args.ensemble_top_n < 1:
+        raise ValueError("--ensemble-top-n must be >= 1.")
+    if args.ensemble_top_n > 1 and (args.search_score_blend or args.search_rank_fusion):
+        raise ValueError("--ensemble-top-n currently supports direct XGBoost score averaging only.")
 
     try:
         import xgboost as xgb
@@ -1158,9 +1346,17 @@ def main() -> int:
         features = add_xgb_response_prior_features(features)
     if args.use_content_features:
         features = add_content_affinity_features(features, sources)
+    if args.use_text_embedding_features:
+        features = add_text_embedding_features(
+            features,
+            sources,
+            args.text_embedding_components,
+            args.text_max_features,
+        )
     feature_columns = _feature_columns(
         args.use_response_priors,
         args.use_content_features,
+        args.use_text_embedding_features,
         args.use_derived_features,
         args.use_value_features,
         args.use_coupon_family_features,
@@ -1215,6 +1411,7 @@ def main() -> int:
         row["pull_forward_max_days"] = args.pull_forward_max_days
         row["expected_lead_min_days"] = args.expected_lead_min_days
         row["expected_lead_max_days"] = args.expected_lead_max_days
+        row["ensemble_top_n"] = args.ensemble_top_n
         search_rows.append(row)
 
     if not search_rows:
@@ -1243,6 +1440,7 @@ def main() -> int:
         ]
     }
     best_blend_weight = float(best_row.get("xgb_blend_weight", 1.0))
+    ensemble_configs = _select_ensemble_configs(search_frame, args.primary_metric, args.ensemble_top_n)
     best_rank_fusion_config = {
         "rank_fusion_method": best_row.get("rank_fusion_method", "none"),
         "rank_fusion_c": float(best_row.get("rank_fusion_c", 0.0)),
@@ -1251,25 +1449,51 @@ def main() -> int:
         "rank_fusion_base_weight": float(best_row.get("rank_fusion_base_weight", 0.0)),
         "rank_fusion_global_weight": float(best_row.get("rank_fusion_global_weight", 0.0)),
     }
-    best_train = _filter_positive_event_groups(train, bool(best_config.get("positive_train_events_only", False)))
-    train_x, train_y, train_groups, _ = _grouped_xy(best_train, feature_columns)
-    best_ranker = _fit_ranker(xgb, best_config, device, args.seed, train_x, train_y, train_groups)
-    val_scores = best_ranker.predict(val_x)
-    if str(best_rank_fusion_config.get("rank_fusion_method", "none")) != "none":
-        val_final_scores = _rank_fusion_scores(val_ordered, val_scores, val_heuristic_scores, best_rank_fusion_config)
+    final_rankers: list[object]
+    if args.ensemble_top_n > 1:
+        val_final_scores, _ = _average_ranker_scores(
+            xgb,
+            ensemble_configs,
+            device,
+            args.seed,
+            train,
+            feature_columns,
+            val_x,
+            val_ordered,
+        )
     else:
-        val_final_scores = _blend_scores(val_ordered, val_scores, val_heuristic_scores, best_blend_weight)
+        best_train = _filter_positive_event_groups(train, bool(best_config.get("positive_train_events_only", False)))
+        train_x, train_y, train_groups, _ = _grouped_xy(best_train, feature_columns)
+        best_ranker = _fit_ranker(xgb, best_config, device, args.seed, train_x, train_y, train_groups)
+        val_scores = best_ranker.predict(val_x)
+        if str(best_rank_fusion_config.get("rank_fusion_method", "none")) != "none":
+            val_final_scores = _rank_fusion_scores(val_ordered, val_scores, val_heuristic_scores, best_rank_fusion_config)
+        else:
+            val_final_scores = _blend_scores(val_ordered, val_scores, val_heuristic_scores, best_blend_weight)
     val_ranked = _rank_scores(val_ordered, val_final_scores, max_k)
 
     final_train = pd.concat([train, validation], ignore_index=True)
-    final_train = _filter_positive_event_groups(final_train, bool(best_config.get("positive_train_events_only", False)))
-    final_train_x, final_train_y, final_train_groups, _ = _grouped_xy(final_train, feature_columns)
-    final_ranker = _fit_ranker(xgb, best_config, device, args.seed, final_train_x, final_train_y, final_train_groups)
-    test_scores = final_ranker.predict(test_x)
-    if str(best_rank_fusion_config.get("rank_fusion_method", "none")) != "none":
-        test_final_scores = _rank_fusion_scores(test_ordered, test_scores, test_heuristic_scores, best_rank_fusion_config)
+    if args.ensemble_top_n > 1:
+        test_final_scores, final_rankers = _average_ranker_scores(
+            xgb,
+            ensemble_configs,
+            device,
+            args.seed,
+            final_train,
+            feature_columns,
+            test_x,
+            test_ordered,
+        )
     else:
-        test_final_scores = _blend_scores(test_ordered, test_scores, test_heuristic_scores, best_blend_weight)
+        final_train = _filter_positive_event_groups(final_train, bool(best_config.get("positive_train_events_only", False)))
+        final_train_x, final_train_y, final_train_groups, _ = _grouped_xy(final_train, feature_columns)
+        final_ranker = _fit_ranker(xgb, best_config, device, args.seed, final_train_x, final_train_y, final_train_groups)
+        final_rankers = [final_ranker]
+        test_scores = final_ranker.predict(test_x)
+        if str(best_rank_fusion_config.get("rank_fusion_method", "none")) != "none":
+            test_final_scores = _rank_fusion_scores(test_ordered, test_scores, test_heuristic_scores, best_rank_fusion_config)
+        else:
+            test_final_scores = _blend_scores(test_ordered, test_scores, test_heuristic_scores, best_blend_weight)
     test_ranked = _rank_scores(test_ordered, test_final_scores, max_k)
 
     comparison_rows = []
@@ -1293,6 +1517,7 @@ def main() -> int:
             "pull_forward_max_days": args.pull_forward_max_days,
             "expected_lead_min_days": args.expected_lead_min_days,
             "expected_lead_max_days": args.expected_lead_max_days,
+            "ensemble_top_n": args.ensemble_top_n,
         }
         row.update(best_rank_fusion_config)
         row.update(best_config)
@@ -1322,10 +1547,11 @@ def main() -> int:
         index=False,
     )
 
+    importances = np.vstack([ranker.feature_importances_ for ranker in final_rankers])
     importance = pd.DataFrame(
         {
             "feature": feature_columns,
-            "importance": final_ranker.feature_importances_,
+            "importance": importances.mean(axis=0),
         }
     ).sort_values("importance", ascending=False)
     importance.to_csv(args.outputs_dir / "coupon_response_xgboost_feature_importance.csv", index=False)

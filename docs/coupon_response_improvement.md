@@ -134,6 +134,8 @@ Additional validation-search options are available:
 ```bash
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --wide-search --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme expected_lead_timing --expected-lead-min-days 1 --expected-lead-max-days 2 --primary-metric recall_at_20
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --ensemble-top-n 2
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --use-text-embedding-features
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-score-blend --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-rank-fusion --primary-metric ndcg_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --wide-search --use-value-features --primary-metric recall_at_20
@@ -150,10 +152,15 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 | Default XGBoost LTR | 0.4105 | 0.3255 | 0.5321 | 0.5058 | 0.3541 |
 | Expected coupon-lead relevance labels | 0.4105 | 0.3259 | 0.5321 | 0.5058 | 0.3545 |
 | Pull-forward interval relevance labels | 0.4154 | 0.3291 | 0.5321 | 0.5058 | 0.3557 |
+| Pull-forward window `[0, 3]` | 0.4105 | 0.3261 | 0.5321 | 0.5058 | 0.3546 |
+| Pull-forward window `[1, 3]` | 0.4105 | 0.3256 | 0.5321 | 0.5058 | 0.3540 |
 | Wide search only | 0.4105 | 0.3255 | 0.5321 | 0.5058 | 0.3541 |
 | Wide search + value features | 0.4135 | 0.3251 | 0.5321 | 0.5058 | 0.3526 |
 | Coupon-family features | 0.4002 | 0.3183 | 0.4954 | 0.4968 | 0.3472 |
 | Redemption features | 0.4105 | 0.3255 | 0.5321 | 0.5058 | 0.3539 |
+| XGBoost ensemble top-2 | 0.4135 | 0.3277 | 0.5321 | 0.5058 | 0.3552 |
+| XGBoost ensemble top-3 | 0.4013 | 0.3234 | 0.5229 | 0.5081 | 0.3557 |
+| TF-IDF/SVD product-text profile | 0.4006 | 0.3176 | 0.5138 | 0.5188 | 0.3529 |
 | Validation score blend | 0.3945 | 0.3079 | 0.5046 | 0.5155 | 0.3442 |
 | Rank fusion, selected on NDCG@20 | 0.4103 | 0.3188 | 0.5321 | 0.5215 | 0.3505 |
 
@@ -162,6 +169,8 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 `--use-redemption-features` adds prior coupon redemption count, prior same-coupon-UPC redemption, and prior product/category redemption signals. The features are leakage-safe because only redemption dates before the campaign start are used. They were too sparse to improve held-out NDCG@10.
 
 `--search-rank-fusion` tunes reciprocal-rank or exponential-rank fusion over XGBoost and repeat-cadence ranks. It can improve broader Recall@20, but the held-out NDCG@10 and NDCG@20 tradeoff is worse than the default XGBoost LTR model.
+
+`--ensemble-top-n` averages validation-selected XGBoost rankers after event-level score normalization. The top-2 ensemble stayed close to the final model and slightly preserved NDCG@20, but it did not beat the single pull-forward interval ranker on held-out NDCG@10.
 
 An optional historical response-prior feature set is available through:
 
@@ -178,6 +187,14 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 ```
 
 These features use department, brand, product category, and product type affinity. They improved validation in one run but reduced held-out NDCG@10, so they are kept as an optional exploration rather than the default final model.
+
+NLP product-text profile features are available through:
+
+```bash
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --use-text-embedding-features
+```
+
+This builds a TF-IDF plus TruncatedSVD embedding from product department, category, type, brand, and package-size text, then compares each candidate product against the household's prior product-text profile before the campaign start. It is leakage-safe and improves broader Recall@20 in this run, but held-out NDCG@10 drops, so it remains an ablation rather than the final model.
 
 Event-relative rank and interaction features are available through:
 
@@ -214,13 +231,14 @@ A pointwise XGBoost classifier was also checked as a negative ablation. The best
 | XGBoost plus redemption features | Optional ablation | Leakage-safe but too sparse to move the main metric |
 | XGBoost plus heuristic score blend | Negative ablation | Validation improved but held-out test worsened |
 | XGBoost plus rank fusion | Negative ablation | Better Recall@20 in one setting, worse held-out NDCG@10/NDCG@20 |
+| XGBoost validation ensemble | Negative ablation | Top-2 stayed close but did not beat the single pull-forward model on NDCG@10 |
 | Campaign-type expert models | Negative ablation | Improved Recall@20 slightly, but hurt NDCG@10 |
 | Type-A filtering and Type-B validation | Negative ablation | Did not beat the default held-out NDCG@10 or Hit@10 |
 | LightGBM LambdaRank | Negative ablation | Best checked variant reached about 0.3225 held-out NDCG@10, below XGBoost |
 | Pointwise XGBoost classifier | Negative ablation | Validation looked strong, held-out test was weaker |
 | Response-prior features | Optional ablation | Less stable across campaign split |
 | Product-content affinity features | Optional ablation | Useful research direction, not final default |
-| TF-IDF/SVD product-text profile | Negative ablation | RedNote-style structured-text proxy was used by the model but did not improve held-out NDCG@10 |
+| TF-IDF/SVD product-text profile | Negative ablation | RedNote-style structured-text proxy improved Recall@20 but reduced held-out NDCG@10 |
 | Event-relative interaction features | Optional ablation | Validation gains did not transfer to held-out NDCG@10 |
 | RedNote/NoteLLM-style multimodal | Future work | Data lacks product images, notes, reviews, and social content |
 
