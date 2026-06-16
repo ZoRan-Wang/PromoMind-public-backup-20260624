@@ -1,7 +1,9 @@
 """Train an XGBoost learning-to-rank coupon-response model.
 
-The model uses household-campaign groups and binary coupon-response labels:
+The model uses household-campaign groups and coupon-response labels:
 an item is relevant if it is bought within five days after campaign start.
+The final variant can use graded pull-forward timing labels, where purchases
+near the household's expected repurchase cadence receive higher relevance.
 XGBoost is optional and can use CUDA when available.
 """
 
@@ -135,6 +137,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--search-score-blend", action="store_true", help="Tune a validation-selected blend of XGBoost and repeat-cadence scores.")
     parser.add_argument("--blend-step", type=float, default=0.05, help="Grid step for --search-score-blend.")
     parser.add_argument("--search-rank-fusion", action="store_true", help="Tune validation-selected rank fusion over XGBoost and heuristic ranks.")
+    parser.add_argument(
+        "--label-scheme",
+        choices=["binary", "pull_forward_timing", "pull_forward_interval", "expected_lead_timing"],
+        default="binary",
+        help="Training label scheme. Use pull_forward_interval or expected_lead_timing for graded timing relevance.",
+    )
+    parser.add_argument("--timing-grade-early-end-days", type=float, default=1.0)
+    parser.add_argument("--timing-grade-middle-end-days", type=float, default=3.0)
+    parser.add_argument("--pull-forward-min-days", type=float, default=-1.0)
+    parser.add_argument("--pull-forward-max-days", type=float, default=2.0)
+    parser.add_argument("--expected-lead-min-days", type=float, default=1.0)
+    parser.add_argument("--expected-lead-max-days", type=float, default=2.0)
     parser.add_argument("--primary-metric", default="recall_at_20")
     parser.add_argument("--selection-tolerance", type=float, default=0.001)
     parser.add_argument("--use-response-priors", action="store_true", help="Add train-period product/category response priors.")
@@ -169,6 +183,72 @@ def _feature_columns(
     if use_content_features:
         columns.extend(XGB_CONTENT_FEATURES)
     return columns
+
+
+def apply_label_scheme(
+    features: pd.DataFrame,
+    truth: pd.DataFrame,
+    scheme: str,
+    early_end_days: float = 1.0,
+    middle_end_days: float = 3.0,
+    pull_forward_min_days: float = -1.0,
+    pull_forward_max_days: float = 2.0,
+    expected_lead_min_days: float = 1.0,
+    expected_lead_max_days: float = 2.0,
+) -> pd.DataFrame:
+    """Transform binary labels into optional integer relevance grades."""
+
+    if scheme == "binary":
+        return features
+    if scheme not in {"pull_forward_timing", "pull_forward_interval", "expected_lead_timing"}:
+        raise ValueError(f"Unsupported label scheme: {scheme}")
+    if scheme == "pull_forward_timing" and not (0.0 <= early_end_days < middle_end_days <= 5.0):
+        raise ValueError("Timing grade boundaries must satisfy 0 <= early < middle <= 5 days.")
+    if scheme == "pull_forward_interval" and pull_forward_min_days > pull_forward_max_days:
+        raise ValueError("Pull-forward boundaries must satisfy min <= max days.")
+    if scheme == "expected_lead_timing" and expected_lead_min_days > expected_lead_max_days:
+        raise ValueError("Expected-lead boundaries must satisfy min <= max days.")
+
+    out = features.copy()
+    labels = truth[[base.EVENT_COL, schema.PRODUCT_ID, "observed_purchase_time"]].drop_duplicates().copy()
+    labels["observed_purchase_time"] = pd.to_datetime(
+        labels["observed_purchase_time"],
+        errors="coerce",
+        format="mixed",
+    )
+    timing = out[[base.EVENT_COL, schema.PRODUCT_ID, "coupon_start_date"]].merge(
+        labels,
+        on=[base.EVENT_COL, schema.PRODUCT_ID],
+        how="left",
+    )
+    start = pd.to_datetime(timing["coupon_start_date"], errors="coerce")
+    days_after_coupon = (
+        (timing["observed_purchase_time"] - start).dt.total_seconds() / 86400.0
+    ).fillna(np.inf)
+    positive = out["label"].to_numpy(dtype=float) > 0
+    grade = np.zeros(len(out), dtype=np.float32)
+    grade[positive] = 2.0
+
+    if scheme == "pull_forward_timing":
+        middle = positive & (days_after_coupon.to_numpy() > early_end_days) & (
+            days_after_coupon.to_numpy() <= middle_end_days
+        )
+    elif scheme == "pull_forward_interval":
+        actual_interval = out["days_since_last"].to_numpy(dtype=float) + days_after_coupon.to_numpy(dtype=float)
+        pull_forward_days = out["median_interval_days"].to_numpy(dtype=float) - actual_interval
+        finite = np.isfinite(actual_interval) & np.isfinite(pull_forward_days)
+        middle = positive & finite & (pull_forward_days >= pull_forward_min_days) & (
+            pull_forward_days <= pull_forward_max_days
+        )
+    else:
+        expected_lead_days = out["median_interval_days"].to_numpy(dtype=float) - out["days_since_last"].to_numpy(dtype=float)
+        finite = np.isfinite(expected_lead_days)
+        middle = positive & finite & (expected_lead_days >= expected_lead_min_days) & (
+            expected_lead_days <= expected_lead_max_days
+        )
+    grade[middle] = 3.0
+    out["label"] = grade
+    return out
 
 
 def _grouped_xy(frame: pd.DataFrame, feature_columns: list[str]) -> tuple[pd.DataFrame, pd.Series, list[int], pd.DataFrame]:
@@ -1055,6 +1135,17 @@ def main() -> int:
     events = neural.make_all_events(sources)
     features, truth = neural.load_or_build_features(args, sources, events)
     features = neural.attach_labels(neural.add_model_features(features), truth)
+    features = apply_label_scheme(
+        features,
+        truth,
+        args.label_scheme,
+        args.timing_grade_early_end_days,
+        args.timing_grade_middle_end_days,
+        args.pull_forward_min_days,
+        args.pull_forward_max_days,
+        args.expected_lead_min_days,
+        args.expected_lead_max_days,
+    )
     if args.use_derived_features:
         features = add_xgb_derived_features(features)
     if args.use_value_features:
@@ -1117,6 +1208,13 @@ def main() -> int:
             blend_weights,
             rank_fusion_configs,
         )
+        row["label_scheme"] = args.label_scheme
+        row["timing_grade_early_end_days"] = args.timing_grade_early_end_days
+        row["timing_grade_middle_end_days"] = args.timing_grade_middle_end_days
+        row["pull_forward_min_days"] = args.pull_forward_min_days
+        row["pull_forward_max_days"] = args.pull_forward_max_days
+        row["expected_lead_min_days"] = args.expected_lead_min_days
+        row["expected_lead_max_days"] = args.expected_lead_max_days
         search_rows.append(row)
 
     if not search_rows:
@@ -1188,6 +1286,13 @@ def main() -> int:
             "primary_metric": args.primary_metric,
             "selection_tolerance": args.selection_tolerance if args.search else 0.0,
             "xgb_blend_weight": best_blend_weight,
+            "label_scheme": args.label_scheme,
+            "timing_grade_early_end_days": args.timing_grade_early_end_days,
+            "timing_grade_middle_end_days": args.timing_grade_middle_end_days,
+            "pull_forward_min_days": args.pull_forward_min_days,
+            "pull_forward_max_days": args.pull_forward_max_days,
+            "expected_lead_min_days": args.expected_lead_min_days,
+            "expected_lead_max_days": args.expected_lead_max_days,
         }
         row.update(best_rank_fusion_config)
         row.update(best_config)

@@ -22,7 +22,7 @@ python scripts/run_coupon_response_ranker.py --device auto --primary-metric ndcg
 Supervised GPU learning-to-rank variant:
 
 ```bash
-python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --primary-metric recall_at_20
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20
 ```
 
 Split drift diagnostic:
@@ -102,20 +102,29 @@ Additional supervised model exploration:
 | Model | Device | Recall@10 | NDCG@10 | Positive Event Hit@10 | All Event Hit@10 |
 | --- | --- | ---: | ---: | ---: | ---: |
 | PyTorch pairwise neural ranker | CUDA | 0.3983 | 0.3132 | 0.4954 | 0.0755 |
-| XGBoost ranker, validation-selected | CUDA | 0.4105 | 0.3255 | 0.5321 | 0.0811 |
+| XGBoost ranker, binary labels | CUDA | 0.4105 | 0.3255 | 0.5321 | 0.0811 |
+| XGBoost ranker, expected coupon-lead labels | CUDA | 0.4105 | 0.3259 | 0.5321 | 0.0811 |
+| XGBoost ranker, pull-forward interval labels | CUDA | 0.4154 | 0.3291 | 0.5321 | 0.0811 |
 
 The main gain is against the previous SOTA-candidate-only coupon baseline:
 
 ```text
 Positive Event Hit@10: 19.27% -> 53.21%
-NDCG@10:               0.1489 -> 0.3255
-Recall@10:             0.1570 -> 0.4105
+NDCG@10:               0.1489 -> 0.3291
+Recall@10:             0.1570 -> 0.4154
 ```
+
+The final XGBoost configuration uses graded relevance for coupon timing. We tested two business interpretations:
+
+- `expected_lead_timing`: if the coupon starts one to two days before the household's expected repurchase date, a later observed purchase receives relevance grade 3; other observed purchases receive grade 2; non-purchases receive grade 0.
+- `pull_forward_interval`: if the observed purchase interval stays near the household's historical median interval, with `median_interval_days - actual_interval` in `[-1, 2]`, the purchase receives relevance grade 3; other observed purchases receive grade 2; non-purchases receive grade 0.
+
+The second scheme is the final reported model because it best matches the "actual repurchase interval is roughly unchanged" assumption and produces the strongest held-out NDCG@10. This changes the ranking supervision, while held-out evaluation still uses actual future purchases.
 
 The XGBoost configuration above is selected only from validation campaigns using a conservative tolerance rule: choose the simplest configuration within `0.001` of the best validation primary metric.
 
 ```bash
-python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --primary-metric recall_at_20
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20
 ```
 
 The selected configuration is then retrained on train plus validation events before test scoring.
@@ -124,6 +133,7 @@ Additional validation-search options are available:
 
 ```bash
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --wide-search --primary-metric recall_at_20
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme expected_lead_timing --expected-lead-min-days 1 --expected-lead-max-days 2 --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-score-blend --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-rank-fusion --primary-metric ndcg_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --wide-search --use-value-features --primary-metric recall_at_20
@@ -138,6 +148,8 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 | Variant | Recall@10 | NDCG@10 | Positive Event Hit@10 | Recall@20 | NDCG@20 |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Default XGBoost LTR | 0.4105 | 0.3255 | 0.5321 | 0.5058 | 0.3541 |
+| Expected coupon-lead relevance labels | 0.4105 | 0.3259 | 0.5321 | 0.5058 | 0.3545 |
+| Pull-forward interval relevance labels | 0.4154 | 0.3291 | 0.5321 | 0.5058 | 0.3557 |
 | Wide search only | 0.4105 | 0.3255 | 0.5321 | 0.5058 | 0.3541 |
 | Wide search + value features | 0.4135 | 0.3251 | 0.5321 | 0.5058 | 0.3526 |
 | Coupon-family features | 0.4002 | 0.3183 | 0.4954 | 0.4968 | 0.3472 |
@@ -192,7 +204,9 @@ A pointwise XGBoost classifier was also checked as a negative ablation. The best
 | Candidate-pool expansion | Diagnosed | Test candidate pool already covers 99.56% of truth items |
 | Heuristic time-aware ranker | Kept as strong interpretable baseline | Strong and stable, but below XGBoost on NDCG@10 |
 | PyTorch pairwise neural ranker | Implemented | Competitive, but below XGBoost on held-out NDCG@10 |
-| XGBoost learning-to-rank | Final default | Best held-out NDCG@10 and Positive Event Hit@10 |
+| XGBoost learning-to-rank with pull-forward interval labels | Final default | Best held-out NDCG@10 while preserving Positive Event Hit@10 |
+| XGBoost learning-to-rank with expected coupon-lead labels | Business ablation | Directly models one-to-two-day early coupon issue timing, but lower held-out NDCG@10 than interval labels |
+| XGBoost learning-to-rank with binary labels | Strong baseline | Slightly lower held-out NDCG@10/NDCG@20 than pull-forward interval labels |
 | XGBoost wide search | Diagnosed | Re-selected the default held-out best configuration |
 | XGBoost objective search | Optional ablation | `rank:pairwise` and `rank:map` did not improve held-out NDCG@10 |
 | XGBoost plus value features | Optional ablation | Slight Recall@10 gain, slightly worse held-out NDCG@10 |

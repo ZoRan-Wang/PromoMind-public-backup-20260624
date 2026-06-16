@@ -86,6 +86,88 @@ def test_rank_fusion_scores_can_combine_xgb_and_heuristic_ranks():
     assert np.allclose(scores, [0.5 / 11.0 + 0.5 / 12.0, 0.5 / 12.0 + 0.5 / 11.0])
 
 
+def test_pull_forward_timing_labels_grade_middle_highest():
+    features = pd.DataFrame(
+        {
+            "event_id": ["a", "a", "a", "a"],
+            "product_id": [1, 2, 3, 4],
+            "coupon_start_date": ["2026-01-10"] * 4,
+            "label": [1.0, 1.0, 1.0, 0.0],
+        }
+    )
+    truth = pd.DataFrame(
+        {
+            "event_id": ["a", "a", "a"],
+            "product_id": [1, 2, 3],
+            "observed_purchase_time": ["2026-01-10 12:00:00", "2026-01-12", "2026-01-14"],
+        }
+    )
+
+    out = xgbr.apply_label_scheme(features, truth, "pull_forward_timing")
+
+    assert out["label"].tolist() == [2.0, 3.0, 2.0, 0.0]
+
+
+def test_pull_forward_interval_labels_use_repurchase_cadence_window():
+    features = pd.DataFrame(
+        {
+            "event_id": ["a", "a", "a", "a"],
+            "product_id": [1, 2, 3, 4],
+            "coupon_start_date": ["2026-01-10"] * 4,
+            "days_since_last": [8.0, 7.0, 9.0, 8.0],
+            "median_interval_days": [10.0, 10.0, 10.0, 10.0],
+            "label": [1.0, 1.0, 1.0, 0.0],
+        }
+    )
+    truth = pd.DataFrame(
+        {
+            "event_id": ["a", "a", "a"],
+            "product_id": [1, 2, 3],
+            "observed_purchase_time": ["2026-01-11", "2026-01-10 12:00:00", "2026-01-13"],
+        }
+    )
+
+    out = xgbr.apply_label_scheme(
+        features,
+        truth,
+        "pull_forward_interval",
+        pull_forward_min_days=-1.0,
+        pull_forward_max_days=2.0,
+    )
+
+    assert out["label"].tolist() == [3.0, 2.0, 2.0, 0.0]
+
+
+def test_expected_lead_timing_labels_prefer_one_to_two_day_coupon_lead():
+    features = pd.DataFrame(
+        {
+            "event_id": ["a", "a", "a", "a"],
+            "product_id": [1, 2, 3, 4],
+            "coupon_start_date": ["2026-01-10"] * 4,
+            "days_since_last": [8.5, 9.5, 6.0, 8.0],
+            "median_interval_days": [10.0, 10.0, 10.0, 10.0],
+            "label": [1.0, 1.0, 1.0, 0.0],
+        }
+    )
+    truth = pd.DataFrame(
+        {
+            "event_id": ["a", "a", "a"],
+            "product_id": [1, 2, 3],
+            "observed_purchase_time": ["2026-01-11", "2026-01-11", "2026-01-11"],
+        }
+    )
+
+    out = xgbr.apply_label_scheme(
+        features,
+        truth,
+        "expected_lead_timing",
+        expected_lead_min_days=1.0,
+        expected_lead_max_days=2.0,
+    )
+
+    assert out["label"].tolist() == [3.0, 2.0, 2.0, 0.0]
+
+
 def test_coupon_family_features_use_prior_same_coupon_upc_history():
     features = pd.DataFrame(
         {

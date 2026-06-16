@@ -101,16 +101,18 @@ Run the upgraded coupon-response ranker with CUDA scoring when available:
 python scripts/run_coupon_response_ranker.py --device auto --primary-metric ndcg_at_10
 ```
 
-Run the supervised XGBoost learning-to-rank coupon-response model with CUDA when available:
+Run the final supervised XGBoost learning-to-rank coupon-response model with CUDA when available:
 
 ```bash
-python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --primary-metric recall_at_20
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20
 ```
 
 Run optional robustness diagnostics and ablations:
 
 ```bash
 python scripts/analyze_coupon_response_drift.py
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --primary-metric recall_at_20
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme expected_lead_timing --expected-lead-min-days 1 --expected-lead-max-days 2 --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --wide-search --use-value-features --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-score-blend --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-rank-fusion --primary-metric ndcg_at_20
