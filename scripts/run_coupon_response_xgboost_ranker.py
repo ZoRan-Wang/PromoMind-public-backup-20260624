@@ -79,6 +79,15 @@ XGB_VALUE_FEATURES = [
     "household_coupon_product_signal",
     "campaign_duration_days_log",
 ]
+XGB_COUPON_FAMILY_FEATURES = [
+    "coupon_family_size_log",
+    "coupon_family_global_signal",
+    "coupon_family_repeat_signal",
+    "coupon_family_count_log",
+    "coupon_family_match",
+    "coupon_family_substitute_signal",
+    "product_coupon_upc_count_log",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -113,6 +122,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use-content-features", action="store_true", help="Add product metadata affinity features.")
     parser.add_argument("--use-derived-features", action="store_true", help="Add event-relative rank and interaction features.")
     parser.add_argument("--use-value-features", action="store_true", help="Add historical price, spend, and discount-sensitivity features.")
+    parser.add_argument("--use-coupon-family-features", action="store_true", help="Add campaign coupon-UPC family repeat features.")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -122,12 +132,15 @@ def _feature_columns(
     use_content_features: bool = False,
     use_derived_features: bool = False,
     use_value_features: bool = False,
+    use_coupon_family_features: bool = False,
 ) -> list[str]:
     columns = list(neural.FEATURE_COLUMNS)
     if use_derived_features:
         columns.extend(XGB_DERIVED_FEATURES)
     if use_value_features:
         columns.extend(XGB_VALUE_FEATURES)
+    if use_coupon_family_features:
+        columns.extend(XGB_COUPON_FAMILY_FEATURES)
     if use_response_priors:
         columns.extend(XGB_EXTRA_FEATURES)
     if use_content_features:
@@ -519,6 +532,106 @@ def add_value_features(features: pd.DataFrame, sources: dict[str, pd.DataFrame])
     return out
 
 
+def add_coupon_family_features(features: pd.DataFrame, sources: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Add campaign-local coupon family history.
+
+    A coupon UPC can map to multiple product IDs in a campaign. These features
+    capture whether a household bought any product in the same coupon family
+    before the campaign starts, not only the exact candidate product.
+    """
+
+    out = features.copy()
+    coupons = sources["coupons"][["campaign_id", "coupon_upc", schema.PRODUCT_ID]].drop_duplicates().copy()
+    transactions = sources["transactions"][
+        [schema.HOUSEHOLD_ID, schema.PRODUCT_ID, "transaction_timestamp"]
+    ].copy()
+    transactions[schema.PRODUCT_ID] = pd.to_numeric(transactions[schema.PRODUCT_ID], errors="coerce").astype("Int64")
+    transactions = transactions.dropna(subset=[schema.PRODUCT_ID])
+    transactions[schema.PRODUCT_ID] = transactions[schema.PRODUCT_ID].astype(int)
+
+    for feature in XGB_COUPON_FAMILY_FEATURES:
+        out[feature] = 0.0
+
+    for campaign_id, index in out.groupby("campaign_id", sort=True).groups.items():
+        group = out.loc[index]
+        campaign_coupons = coupons[coupons["campaign_id"] == int(campaign_id)].copy()
+        if campaign_coupons.empty:
+            continue
+
+        start = pd.Timestamp(group["coupon_start_date"].iloc[0])
+        history = transactions[transactions["transaction_timestamp"] < start].copy()
+        if history.empty:
+            continue
+
+        coupon_family_size = campaign_coupons.groupby("coupon_upc")[schema.PRODUCT_ID].nunique()
+        product_coupon_count = campaign_coupons.groupby(schema.PRODUCT_ID)["coupon_upc"].nunique()
+
+        matched_history = history.merge(campaign_coupons, on=schema.PRODUCT_ID, how="inner")
+        if matched_history.empty:
+            family_global_counts = pd.Series(dtype=float)
+            family_household_counts = pd.Series(dtype=float)
+        else:
+            family_global_counts = matched_history.groupby("coupon_upc").size().astype(float)
+            family_household_counts = matched_history.groupby([schema.HOUSEHOLD_ID, "coupon_upc"]).size().astype(float)
+
+        max_global = float(np.log1p(family_global_counts.max())) if not family_global_counts.empty else 1.0
+        max_global = max(max_global, 1.0)
+
+        row_family = campaign_coupons.merge(
+            group[[schema.HOUSEHOLD_ID, schema.PRODUCT_ID, "user_product_count"]],
+            on=schema.PRODUCT_ID,
+            how="inner",
+        )
+        if row_family.empty:
+            continue
+
+        family_rows = []
+        for row in row_family.itertuples(index=False):
+            household_id = int(getattr(row, schema.HOUSEHOLD_ID))
+            product_id = int(getattr(row, schema.PRODUCT_ID))
+            coupon_upc = int(getattr(row, "coupon_upc"))
+            family_count = float(family_household_counts.get((household_id, coupon_upc), 0.0))
+            exact_count = float(getattr(row, "user_product_count"))
+            family_rows.append(
+                {
+                    schema.HOUSEHOLD_ID: household_id,
+                    schema.PRODUCT_ID: product_id,
+                    "coupon_family_size_log": math.log1p(float(coupon_family_size.get(coupon_upc, 0.0))),
+                    "coupon_family_global_signal": math.log1p(float(family_global_counts.get(coupon_upc, 0.0))) / max_global,
+                    "coupon_family_count_log": math.log1p(family_count),
+                    "coupon_family_match": float(family_count > 0.0),
+                    "coupon_family_substitute_signal": math.log1p(max(0.0, family_count - exact_count)),
+                    "product_coupon_upc_count_log": math.log1p(float(product_coupon_count.get(product_id, 0.0))),
+                }
+            )
+
+        family_features = pd.DataFrame(family_rows)
+        if family_features.empty:
+            continue
+        aggregated = family_features.groupby([schema.HOUSEHOLD_ID, schema.PRODUCT_ID], as_index=False).agg(
+            coupon_family_size_log=("coupon_family_size_log", "max"),
+            coupon_family_global_signal=("coupon_family_global_signal", "max"),
+            coupon_family_count_log=("coupon_family_count_log", "max"),
+            coupon_family_match=("coupon_family_match", "max"),
+            coupon_family_substitute_signal=("coupon_family_substitute_signal", "max"),
+            product_coupon_upc_count_log=("product_coupon_upc_count_log", "max"),
+        )
+        max_family_count = max(float(aggregated["coupon_family_count_log"].max()), 1.0)
+        aggregated["coupon_family_repeat_signal"] = aggregated["coupon_family_count_log"] / max_family_count
+
+        update = group[[schema.HOUSEHOLD_ID, schema.PRODUCT_ID]].merge(
+            aggregated,
+            on=[schema.HOUSEHOLD_ID, schema.PRODUCT_ID],
+            how="left",
+        )
+        for feature in XGB_COUPON_FAMILY_FEATURES:
+            out.loc[index, feature] = update[feature].fillna(0.0).to_numpy(dtype=float)
+
+    for feature in XGB_COUPON_FAMILY_FEATURES:
+        out[feature] = pd.to_numeric(out[feature], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return out
+
+
 def _candidate_configs(args: argparse.Namespace) -> list[dict[str, float | int | str | bool]]:
     if not args.search:
         return [
@@ -695,6 +808,8 @@ def main() -> int:
         features = add_xgb_derived_features(features)
     if args.use_value_features:
         features = add_value_features(features, sources)
+    if args.use_coupon_family_features:
+        features = add_coupon_family_features(features, sources)
     if args.use_response_priors:
         features = add_xgb_response_prior_features(features)
     if args.use_content_features:
@@ -704,6 +819,7 @@ def main() -> int:
         args.use_content_features,
         args.use_derived_features,
         args.use_value_features,
+        args.use_coupon_family_features,
     )
 
     train = features[features["split"] == "train"].reset_index(drop=True)

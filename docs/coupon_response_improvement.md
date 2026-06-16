@@ -126,6 +126,7 @@ Additional validation-search options are available:
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --wide-search --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-score-blend --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --wide-search --use-value-features --primary-metric recall_at_20
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --use-coupon-family-features --primary-metric recall_at_20
 ```
 
 `--wide-search` expands the XGBoost grid. Under the current validation rule it still selects the same held-out best default configuration. `--search-score-blend` tunes a validation-selected blend between XGBoost scores and the repeat-cadence heuristic. It improved validation Recall@20, but reduced held-out NDCG@10, so it is not the final model.
@@ -137,7 +138,10 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 | Default XGBoost LTR | 0.4105 | 0.3255 | 0.5321 | 0.5058 | 0.3541 |
 | Wide search only | 0.4105 | 0.3255 | 0.5321 | 0.5058 | 0.3541 |
 | Wide search + value features | 0.4135 | 0.3251 | 0.5321 | 0.5058 | 0.3526 |
+| Coupon-family features | 0.4002 | 0.3183 | 0.4954 | 0.4968 | 0.3472 |
 | Validation score blend | 0.3945 | 0.3079 | 0.5046 | 0.5155 | 0.3442 |
+
+`--use-coupon-family-features` treats all products attached to the same campaign coupon UPC as a coupon family and measures household history with that family before the campaign starts. The features were non-zero and used by XGBoost, but they did not generalize to the held-out campaigns.
 
 An optional historical response-prior feature set is available through:
 
@@ -184,10 +188,14 @@ A pointwise XGBoost classifier was also checked as a negative ablation. The best
 | XGBoost wide search | Diagnosed | Re-selected the default held-out best configuration |
 | XGBoost objective search | Optional ablation | `rank:pairwise` and `rank:map` did not improve held-out NDCG@10 |
 | XGBoost plus value features | Optional ablation | Slight Recall@10 gain, slightly worse held-out NDCG@10 |
+| XGBoost plus coupon-family features | Optional ablation | Used by the model, but lower held-out NDCG@10 |
 | XGBoost plus heuristic score blend | Negative ablation | Validation improved but held-out test worsened |
+| Campaign-type expert models | Negative ablation | Improved Recall@20 slightly, but hurt NDCG@10 |
+| LightGBM LambdaRank | Negative ablation | Best checked variant reached about 0.3225 held-out NDCG@10, below XGBoost |
 | Pointwise XGBoost classifier | Negative ablation | Validation looked strong, held-out test was weaker |
 | Response-prior features | Optional ablation | Less stable across campaign split |
 | Product-content affinity features | Optional ablation | Useful research direction, not final default |
+| TF-IDF/SVD product-text profile | Negative ablation | RedNote-style structured-text proxy was used by the model but did not improve held-out NDCG@10 |
 | Event-relative interaction features | Optional ablation | Validation gains did not transfer to held-out NDCG@10 |
 | RedNote/NoteLLM-style multimodal | Future work | Data lacks product images, notes, reviews, and social content |
 
