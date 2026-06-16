@@ -161,6 +161,8 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 | Pull-forward interval relevance labels | 0.4154 | 0.3291 | 0.5321 | 0.5058 | 0.3557 |
 | Pull-forward + non-repeat positives high | 0.4032 | 0.3179 | 0.5046 | 0.5183 | 0.3521 |
 | Tail fusion, top-10 preserved | 0.4154 | 0.3291 | 0.5321 | 0.5260 | 0.3609 |
+| Tail fusion, heuristic secondary | 0.4154 | 0.3291 | 0.5321 | 0.5255 | 0.3604 |
+| Tail fusion, rank-fusion secondary | 0.4154 | 0.3291 | 0.5321 | 0.5236 | 0.3607 |
 | Pull-forward window `[0, 3]` | 0.4105 | 0.3261 | 0.5321 | 0.5058 | 0.3546 |
 | Pull-forward window `[1, 3]` | 0.4105 | 0.3256 | 0.5321 | 0.5058 | 0.3540 |
 | Wide search only | 0.4105 | 0.3255 | 0.5321 | 0.5058 | 0.3541 |
@@ -245,6 +247,8 @@ python scripts/run_coupon_response_tail_fusion.py --primary-candidates outputs/c
 
 The primary ranker is the pull-forward interval XGBoost model. The secondary ranker is the category co-occurrence embedding variant, which has weaker top-10 precision but stronger tail recall. Validation selects `keep_primary_top=12`: ranks 1-12 come from the primary model, then ranks 13-20 are filled from the secondary model with duplicate products removed. This preserves all top-10 metrics while improving held-out Recall@20 and NDCG@20.
 
+Additional tail secondaries were checked after this improvement. The heuristic coupon-response ranker reaches close top-20 performance, and rank-fusion secondaries look stronger on validation, but neither beats the category-embedding secondary on held-out test. Focused multi-secondary filling such as `category > heuristic`, `heuristic > category`, `category > text`, and `rank-fusion > category` also did not improve beyond the single category-embedding tail source. The final artifact therefore keeps the simpler two-source tail fusion.
+
 Event-relative rank and interaction features are available through:
 
 ```bash
@@ -272,6 +276,7 @@ A pointwise XGBoost classifier was also checked as a negative ablation. The best
 | PyTorch pairwise neural ranker | Implemented | Competitive, but below XGBoost on held-out NDCG@10 |
 | XGBoost learning-to-rank with pull-forward interval labels | Final default | Best held-out NDCG@10 while preserving Positive Event Hit@10 |
 | Top-10-preserving XGBoost tail fusion | Final top-20 artifact | Preserves NDCG@10 and improves Recall@20/NDCG@20 |
+| Multi-secondary tail fusion | Negative ablation | Heuristic/rank-fusion/text/new-high secondaries did not beat category embedding as the tail source |
 | XGBoost learning-to-rank with expected coupon-lead labels | Business ablation | Directly models one-to-two-day early coupon issue timing, but lower held-out NDCG@10 than interval labels |
 | Pull-forward labels with new-product positives high | Negative ablation | Improved Recall@20 but hurt top-10 ranking |
 | XGBoost learning-to-rank with binary labels | Strong baseline | Slightly lower held-out NDCG@10/NDCG@20 than pull-forward interval labels |
