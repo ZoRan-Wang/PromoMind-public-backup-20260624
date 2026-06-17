@@ -45,6 +45,15 @@ Not committed:
 
 Those folders are intentionally ignored because some files are large. Regenerate them locally when needed.
 
+Large generated artifacts are also available on Google Drive:
+
+- Folder: <https://drive.google.com/drive/folders/12K-x6t3J-1JQWSQqNrdeRbbRqedNpAHd>
+- Final outputs package: <https://drive.google.com/file/d/1K-Doro51f55lpWCWSSSEo60aqkhWNU9h/view?usp=drivesdk>
+- Raw CSV cache package: <https://drive.google.com/file/d/1BAqzSp6x6-V8QYk-e5eC-_btKuQ3Vgy8/view?usp=drivesdk>
+- Processed cache package: <https://drive.google.com/file/d/1_fJivrUgHJ-bq8CQEld8VeX17S_5XMd2/view?usp=drivesdk>
+
+The Drive folder is shared read-only to anyone with the link.
+
 ## Setup
 
 ```powershell

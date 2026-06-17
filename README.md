@@ -37,6 +37,17 @@ Use `deliverables/final_solution_2026_06_24/` for final-presentation materials:
 - `final_metrics.csv`
 - `top10_recommendation_sample.csv`
 
+## Google Drive Artifacts
+
+Generated outputs and large CSV caches are stored on Google Drive instead of GitHub:
+
+- [PromoMind Final Artifacts folder](https://drive.google.com/drive/folders/12K-x6t3J-1JQWSQqNrdeRbbRqedNpAHd)
+- [Final outputs package](https://drive.google.com/file/d/1K-Doro51f55lpWCWSSSEo60aqkhWNU9h/view?usp=drivesdk): final `outputs/reranked_recommendations.csv`, model-comparison CSVs, search CSVs, final docs, and presentation-ready snapshots.
+- [Raw CSV cache package](https://drive.google.com/file/d/1BAqzSp6x6-V8QYk-e5eC-_btKuQ3Vgy8/view?usp=drivesdk): local `data/raw/*.csv` exports from The Complete Journey.
+- [Processed cache package](https://drive.google.com/file/d/1_fJivrUgHJ-bq8CQEld8VeX17S_5XMd2/view?usp=drivesdk): local `data/processed/*.csv` files.
+
+The Drive folder is shared read-only to anyone with the link. Use the final outputs package when you want to run the Streamlit demo without regenerating all model artifacts. Use the raw/processed cache packages only when you want to skip local R export or preprocessing.
+
 ## Proposed Project
 
 **Title:** PromoMind: A Promotion-aware Grocery Basket Recommender for Retail Marketing Optimization
