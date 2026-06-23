@@ -11,7 +11,9 @@ source venv/bin/activate          # macOS / Linux
 venv\Scripts\activate             # Windows
 ```
 
-The following files must exist in `outputs/` before running. Download them from the Google Drive package if missing (link in `docs/next_flow_handoff.md`):
+The following files must exist in `outputs/` before running. If any are missing, download the **Final outputs package** from Google Drive and extract the zip so each CSV sits at `outputs/<filename>.csv`:
+
+**[Final outputs package](https://drive.google.com/file/d/1K-Doro51f55lpWCWSSSEo60aqkhWNU9h/view?usp=drivesdk)** — contains all required `outputs/` files including the candidates CSV, truth CSV, and pre-generated reranked output.
 
 | File | Source |
 |---|---|
@@ -27,12 +29,14 @@ The following files must exist in `outputs/` before running. Download them from 
 Run the reranking script to get all metrics and the output CSV in one shot:
 
 ```bash
-python scripts/run_coupon_response_reranking.py
+python scripts/run_coupon_response_reranking.py \
+  --candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv \
+  --truth outputs/coupon_response_all_truth.csv
 ```
 
-This uses the default weights (λ=0.1, all other weights 0) established by the ablation study. It prints a full metrics table and writes two files:
+This uses the grid-search-winner defaults (γ=0.1, λ=0.05, ρ=0.1, all others 0). It prints a full metrics table and writes two files:
 
-- `outputs/reranked_C.csv` — Owner C deliverable for Owner D
+- `outputs/reranked_recommendations.csv` — Owner C deliverable for Owner D
 - `outputs/reranking_metrics.csv` — Recall, NDCG, Hit, Coverage, ILD, Novelty, BU at K=5/10/20
 
 ---
@@ -47,26 +51,29 @@ python scripts/run_coupon_response_reranking.py [OPTIONS]
 
 | Option | Default | Description |
 |---|---|---|
-| `--lam` | 0.1 | Discount cost penalty weight λ — the main tunable signal |
+| `--lam` | 0.05 | Discount cost penalty weight λ — grid search winner |
+| `--gamma` | 0.1 | Coupon boost weight γ — grid search winner |
+| `--rho` | 0.1 | Diversity weight ρ — grid search winner |
 | `--beta` | 0.0 | Promotion signal weight β (set to 0: `global_signal` hurt ranking in ablation) |
-| `--gamma` | 0.0 | Coupon boost weight γ (set to 0: all candidates already coupon-eligible) |
-| `--rho` | 0.0 | Diversity weight ρ (marginal effect on this dataset) |
 | `--alpha` | 1.0 | Base score weight α (keep at 1.0) |
-| `--lam-bu` | 0.1 | λ used when computing the Business Utility@K metric |
 | `--eval-split` | test | Split to evaluate on: `test`, `validation`, or `both` |
 | `--eval-k` | 5 10 20 | Cutoff values for evaluation |
 | `--grid-search` | off | Run grid search over β/γ/λ/ρ to find best weights |
 | `--primary-metric` | ndcg_at_10 | Metric to optimise during grid search |
-| `--output-name` | reranked_C.csv | Output filename inside `outputs/` |
+| `--output-name` | reranked_recommendations.csv | Output filename inside `outputs/` |
 
 ### Examples
 
 ```bash
-# Default run
-python scripts/run_coupon_response_reranking.py
+# Default run (γ=0.1, λ=0.05, ρ=0.1)
+python scripts/run_coupon_response_reranking.py \
+  --candidates outputs/candidates_coupon_response_tail_fusion.csv \
+  --truth outputs/coupon_response_all_truth.csv
 
 # Try a stronger discount penalty
-python scripts/run_coupon_response_reranking.py --lam 0.2
+python scripts/run_coupon_response_reranking.py \
+  --candidates outputs/candidates_coupon_response_tail_fusion.csv \
+  --truth outputs/coupon_response_all_truth.csv --lam 0.2
 
 # Evaluate on both splits
 python scripts/run_coupon_response_reranking.py --eval-split both
@@ -124,15 +131,15 @@ Implements and ablates the full five-term formula. Runs an additive ablation (on
 
 Key finding: only λ (discount penalty) has a real business effect. β and γ are ineffective on this dataset. Use the grid search section to pick your operating point.
 
-After running, update `BEST_LAMBDA` (and other weights) in section 9 to produce your final `outputs/reranked_C.csv`.
+After running, update `BEST_LAMBDA` (and other weights) in section 9 to produce your final `outputs/reranked_recommendations.csv`.
 
-Outputs: `outputs/discount_penalty_ablation.csv`, `outputs/discount_penalty_lambda_sweep.csv`, `outputs/grid_search_results.csv`, `outputs/discount_penalty_tradeoff.png`, `outputs/reranked_C.csv`
+Outputs: `outputs/discount_penalty_ablation.csv`, `outputs/discount_penalty_lambda_sweep.csv`, `outputs/grid_search_results.csv`, `outputs/discount_penalty_tradeoff.png`, `outputs/reranked_recommendations.csv`
 
 ---
 
 ## Output file schema
 
-`outputs/reranked_C.csv` contains all original feature columns from the XGBoost candidate file plus the following reranking columns:
+`outputs/reranked_recommendations.csv` contains all original feature columns from the XGBoost candidate file plus the following reranking columns:
 
 | Column | Description |
 |---|---|
@@ -162,4 +169,6 @@ From `notebooks/03_discount_penalty_ablation.ipynb` (test split):
 | + Diversity (ρ=0.1) | 0.4177 | 0.3265 | 0.5229 | 0.2634 |
 | Full formula | 0.4045 | 0.3110 | 0.5229 | 0.3794 |
 
-**Recommendation:** use `--lam 0.1` as the default operating point (minimal accuracy loss, positive BU, meaningful discount cost reduction). Increase λ if the presentation prioritises business utility over NDCG.
+**Recommendation:** use `--lam 0.05 --gamma 0.1 --rho 0.1` as the default operating point (grid search winner from notebook 03, NDCG@10=0.3296). This is the configuration saved in `outputs/reranked_recommendations.csv`. BU@10 values above reflect the notebook 03 formula (positive-events denominator); re-run notebook 03 after any formula changes to refresh these numbers.
+
+**Note on BU numeric reproduction:** BU values are sensitive to the `recommend_coupon` distribution in the candidate file — the `discount_cost` term is `discount_signal × recommend_coupon`, so different candidate CSVs (e.g., tail-fused output vs. the raw XGBoost output) produce numerically different BU scores even with identical weights and formula. To reproduce the table above exactly, use `outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv` from the [Final outputs package](https://drive.google.com/file/d/1K-Doro51f55lpWCWSSSEo60aqkhWNU9h/view?usp=drivesdk) on Google Drive.
