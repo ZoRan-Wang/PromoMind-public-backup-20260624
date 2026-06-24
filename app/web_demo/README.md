@@ -25,6 +25,7 @@ An operational retail-marketing workspace with calm grocery colors, dense rankin
 - Recommendation rows reveal product, category, score, observed outcome, and concise explanation in one scan.
 - Presentation presets switch directly between high-hit events and reasonable no-hit events.
 - Motion highlights page entry, ranked rows, and observed hit labels.
+- Household history shows the real purchase sequence before coupon start for the selected event.
 
 ## Files
 
@@ -36,10 +37,11 @@ An operational retail-marketing workspace with calm grocery colors, dense rankin
 ## Data Inputs
 
 - `outputs/reranked_recommendations.csv`
-- `outputs/demo_history_input.csv`
 - `outputs/demo_time_name_recommendations.csv`
 - `outputs/coupon_response_tail_fusion_model_comparison.csv`
 - `outputs/coupon_response_final_model_comparison.csv`
+- `data/processed/transactions_clean.csv`
+- `data/processed/product_features.csv`
 
 ## Run
 
@@ -74,3 +76,4 @@ http://127.0.0.1:8765
 - v0.3 verification: `python -m compileall app/web_demo/server.py` and `node --check app/web_demo/static/app.js` passed.
 - v0.3 verification: `/api/bootstrap` returned 718 events and 6 presentation presets.
 - v0.3 verification: browser clicks passed for `955_19_20171115`, `1216_20_20171127`, and `1142_22_20171206`; fresh browser error and warning logs were empty.
+- v0.4: connected real household purchase history from `transactions_clean.csv` and `product_features.csv` for every selected event.

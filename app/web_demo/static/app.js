@@ -22,6 +22,7 @@ const el = {
   storyTag: document.querySelector("#storyTag"),
   storyText: document.querySelector("#storyText"),
   avgScore: document.querySelector("#avgScore"),
+  historyMeta: document.querySelector("#historyMeta"),
   recommendationRows: document.querySelector("#recommendationRows"),
   historyRows: document.querySelector("#historyRows"),
   metricBars: document.querySelector("#metricBars"),
@@ -143,7 +144,7 @@ function renderEvent(data) {
   renderStory(preset, kpis);
   renderPresets();
   renderRecommendations(data.recommendations);
-  renderHistory(data.history);
+  renderHistory(data.history, data.history_summary);
 }
 
 function presetFor(eventId) {
@@ -213,12 +214,13 @@ function observedFlag(hit) {
   return child("span", "flag flag-off", "not hit");
 }
 
-function renderHistory(rows) {
+function renderHistory(rows, summary) {
   el.historyRows.replaceChildren();
+  text(el.historyMeta, `Showing ${summary.shown} of ${summary.total_before_coupon}`);
   if (rows.length === 0) {
     const item = document.createElement("li");
-    item.append(child("strong", "", "No matched history rows for this final test event"));
-    item.append(child("span", "", "Use the presentation presets for controlled hit and miss examples."));
+    item.append(child("strong", "", "No prior purchase rows before coupon start"));
+    item.append(child("span", "", `Cutoff ${summary.cutoff}`));
     el.historyRows.append(item);
     return;
   }
@@ -226,7 +228,13 @@ function renderHistory(rows) {
     const item = document.createElement("li");
     item.style.setProperty("--i", index);
     item.append(child("strong", "", row.product_name));
-    item.append(child("span", "", `${row.purchase_time.replace("T", " ")} - ${row.department} / ${row.product_category}`));
+    item.append(
+      child(
+        "span",
+        "",
+        `${row.purchase_time.replace("T", " ")} - ${row.department} / ${row.product_category} - Qty ${Number(row.quantity).toFixed(0)} - $${Number(row.sales_value).toFixed(2)}`,
+      ),
+    );
     el.historyRows.append(item);
   });
 }

@@ -20,12 +20,15 @@ ROOT = Path(__file__).resolve().parents[2]
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
 OUTPUTS = ROOT / "outputs"
+DATA_PROCESSED = ROOT / "data" / "processed"
 
 RECOMMENDATIONS_PATH = OUTPUTS / "reranked_recommendations.csv"
-HISTORY_PATH = OUTPUTS / "demo_history_input.csv"
 DEMO_TIMING_PATH = OUTPUTS / "demo_time_name_recommendations.csv"
 TAIL_FUSION_METRICS_PATH = OUTPUTS / "coupon_response_tail_fusion_model_comparison.csv"
 FINAL_MODEL_METRICS_PATH = OUTPUTS / "coupon_response_final_model_comparison.csv"
+TRANSACTIONS_PATH = DATA_PROCESSED / "transactions_clean.csv"
+PRODUCT_FEATURES_PATH = DATA_PROCESSED / "product_features.csv"
+HISTORY_LIMIT = 30
 
 PRESENTATION_PRESETS = [
     {
@@ -84,6 +87,11 @@ def read_csv_rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def iter_csv_rows(path: Path):
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        yield from csv.DictReader(handle)
+
+
 def as_float(value: str) -> float:
     if value == "" or value.lower() == "nan":
         return 0.0
@@ -100,6 +108,10 @@ def as_bool(value: str) -> bool:
     return value.lower() == "true" or value == "1" or value == "1.0"
 
 
+def product_key(value: str) -> str:
+    return str(as_int(value))
+
+
 def metric_row(rows: list[dict[str, str]], model_name: str, split: str) -> dict[str, str]:
     matches = [row for row in rows if row.get("model_name") == model_name and row.get("split") == split]
     return matches[0]
@@ -108,14 +120,26 @@ def metric_row(rows: list[dict[str, str]], model_name: str, split: str) -> dict[
 class DemoData:
     def __init__(self) -> None:
         self.recommendations = read_csv_rows(RECOMMENDATIONS_PATH)
-        self.history = read_csv_rows(HISTORY_PATH)
         self.demo_timing = read_csv_rows(DEMO_TIMING_PATH)
         self.tail_metrics = read_csv_rows(TAIL_FUSION_METRICS_PATH)
         self.final_metrics = read_csv_rows(FINAL_MODEL_METRICS_PATH)
+        self.product_lookup = self._build_product_lookup()
         self.events = self._build_events()
         self.demo_events = self._build_demo_events()
-        self.history_by_key = self._build_history_index()
+        self.household_history = self._build_household_history()
         self.metric_summary = self._build_metric_summary()
+
+    def _build_product_lookup(self) -> dict[str, dict[str, str]]:
+        products = {}
+        for row in iter_csv_rows(PRODUCT_FEATURES_PATH):
+            product_name = f"{row['brand']} / {row['product_category']} / {row['product_type']}"
+            products[product_key(row["product_id"])] = {
+                "product_name": product_name,
+                "department": row["department"],
+                "product_category": row["product_category"],
+                "brand": row["brand"],
+            }
+        return products
 
     def _build_events(self) -> dict[str, list[dict[str, str]]]:
         grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
@@ -135,14 +159,37 @@ class DemoData:
             rows.sort(key=lambda item: as_int(item["rank"]))
         return dict(sorted(grouped.items()))
 
-    def _build_history_index(self) -> dict[str, list[dict[str, str]]]:
-        grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
-        for row in self.history:
-            key = self.history_key(row["household_id"], row["campaign_id"])
-            grouped[key].append(row)
+    def _build_household_history(self) -> dict[str, list[dict[str, object]]]:
+        households = self._relevant_households()
+        grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
+        for row in iter_csv_rows(TRANSACTIONS_PATH):
+            household_id = row["household_id"]
+            if household_id in households:
+                product = self.product_lookup[product_key(row["product_id"])]
+                grouped[household_id].append(
+                    {
+                        "basket_id": row["basket_id"],
+                        "purchase_time": row["transaction_timestamp"],
+                        "product_id": as_int(row["product_id"]),
+                        "product_name": product["product_name"],
+                        "department": product["department"],
+                        "product_category": product["product_category"],
+                        "brand": product["brand"],
+                        "quantity": as_float(row["quantity"]),
+                        "sales_value": as_float(row["sales_value"]),
+                    }
+                )
         for rows in grouped.values():
-            rows.sort(key=lambda item: item.get("purchase_time", ""))
+            rows.sort(key=lambda item: str(item["purchase_time"]))
         return grouped
+
+    def _relevant_households(self) -> set[str]:
+        households = set()
+        for rows in self.events.values():
+            households.add(rows[0]["household_id"])
+        for rows in self.demo_events.values():
+            households.add(rows[0]["household_id"])
+        return households
 
     def _build_metric_summary(self) -> dict[str, object]:
         baseline = metric_row(self.final_metrics, "coupon_base_intersection", "test")
@@ -176,10 +223,6 @@ class DemoData:
             "ndcg_at_20": as_float(row["ndcg_at_20"]),
             "positive_event_hit_rate_at_20": as_float(row["positive_event_hit_rate_at_20"]),
         }
-
-    @staticmethod
-    def history_key(household_id: str, campaign_id: str) -> str:
-        return f"{household_id}:{campaign_id}"
 
     def event_options(self) -> list[dict[str, object]]:
         demo_options = []
@@ -238,10 +281,7 @@ class DemoData:
             return self.demo_payload(event_id, coupon_slots)
         rows = self.events[event_id]
         first = rows[0]
-        history = self.history_by_key.get(
-            self.history_key(first["household_id"], first["campaign_id"]),
-            [],
-        )
+        history, history_summary = self.recent_history(first["household_id"], first["coupon_start_date"])
         top20 = rows[:20]
         top10 = rows[:10]
         recommended = [self.row_payload(row, coupon_slots) for row in top20]
@@ -268,17 +308,15 @@ class DemoData:
                 ),
                 "avg_top10_score": sum(as_float(row["final_score"]) for row in top10) / len(top10),
             },
-            "history": [self.history_payload(row) for row in history[-24:]],
+            "history_summary": history_summary,
+            "history": [self.history_payload(row) for row in history],
             "recommendations": recommended,
         }
 
     def demo_payload(self, event_id: str, coupon_slots: int) -> dict[str, object]:
         rows = self.demo_events[event_id]
         first = rows[0]
-        history = self.history_by_key.get(
-            self.history_key(first["household_id"], first["campaign_id"]),
-            [],
-        )
+        history, history_summary = self.recent_history(first["household_id"], first["coupon_start_date"])
         top10 = rows[:10]
         return {
             "event": {
@@ -305,20 +343,32 @@ class DemoData:
                 ),
                 "avg_top10_score": sum(1 / as_int(row["rank"]) for row in top10) / len(top10),
             },
-            "history": [self.history_payload(row) for row in history[-24:]],
+            "history_summary": history_summary,
+            "history": [self.history_payload(row) for row in history],
             "recommendations": [self.demo_row_payload(row, coupon_slots) for row in rows[:20]],
         }
 
+    def recent_history(self, household_id: str, coupon_start_date: str) -> tuple[list[dict[str, object]], dict[str, object]]:
+        all_rows = self.household_history.get(household_id, [])
+        prior_rows = [row for row in all_rows if str(row["purchase_time"]) < coupon_start_date]
+        return prior_rows[-HISTORY_LIMIT:], {
+            "shown": min(len(prior_rows), HISTORY_LIMIT),
+            "total_before_coupon": len(prior_rows),
+            "cutoff": coupon_start_date,
+        }
+
     @staticmethod
-    def history_payload(row: dict[str, str]) -> dict[str, object]:
+    def history_payload(row: dict[str, object]) -> dict[str, object]:
         return {
             "basket_id": row["basket_id"],
             "purchase_time": row["purchase_time"],
-            "product_id": as_int(row["product_id"]),
+            "product_id": row["product_id"],
             "product_name": row["product_name"],
             "department": row["department"],
             "product_category": row["product_category"],
             "brand": row["brand"],
+            "quantity": row["quantity"],
+            "sales_value": row["sales_value"],
         }
 
     @staticmethod
