@@ -1,5 +1,5 @@
 const state = {
-  households: [],
+  portfolios: [],
   presets: [],
   metrics: null,
 };
@@ -52,23 +52,23 @@ function child(tag, className, value) {
 }
 
 function setBootstrap(data) {
-  state.households = data.households;
+  state.portfolios = data.portfolios;
   state.presets = data.presets;
   state.metrics = data.metrics;
-  renderHouseholdOptions();
+  renderPortfolioOptions();
   renderPresets();
   renderHeadlineMetrics();
   renderMetricBars();
-  loadSelectedHousehold();
+  loadSelectedPortfolio();
 }
 
-function renderHouseholdOptions() {
+function renderPortfolioOptions() {
   el.householdSelect.replaceChildren();
-  state.households.forEach((household) => {
+  state.portfolios.forEach((portfolio) => {
     const option = document.createElement("option");
-    const prefix = household.positive_in_top10 > 0 ? `HIT ${household.positive_in_top10}` : "NO HIT";
-    option.value = household.household_id;
-    option.textContent = `${prefix} - HH ${household.household_id} - ${household.category_count} categories - ${household.top_product_category}`;
+    const prefix = portfolio.positive_in_top10 > 0 ? `HIT ${portfolio.positive_in_top10}` : "NO HIT";
+    option.value = portfolio.portfolio_id;
+    option.textContent = `${prefix} - HH ${portfolio.household_id} - ${portfolio.coupon_start_date} - ${portfolio.category_count} categories`;
     el.householdSelect.append(option);
   });
 }
@@ -84,11 +84,11 @@ function renderPresets() {
     button.append(child("strong", "", preset.label));
     button.append(child("small", "", preset.story));
     button.addEventListener("click", () => {
-      el.householdSelect.value = preset.household_id;
+      el.householdSelect.value = preset.portfolio_id;
       el.couponSlots.value = preset.coupon_slots;
-      loadSelectedHousehold();
+      loadSelectedPortfolio();
     });
-    if (preset.household_id === el.householdSelect.value) {
+    if (preset.portfolio_id === el.householdSelect.value) {
       button.classList.add("is-active");
     }
     el.presetButtons.append(button);
@@ -120,11 +120,11 @@ function renderMetricBars() {
   });
 }
 
-function loadSelectedHousehold() {
-  const householdId = el.householdSelect.value;
+function loadSelectedPortfolio() {
+  const portfolioId = el.householdSelect.value;
   const couponSlots = el.couponSlots.value;
   text(el.couponSlotsValue, couponSlots);
-  fetch(`/api/recommendations?household_id=${encodeURIComponent(householdId)}&coupon_slots=${couponSlots}`)
+  fetch(`/api/recommendations?portfolio_id=${encodeURIComponent(portfolioId)}&coupon_slots=${couponSlots}`)
     .then((response) => response.json())
     .then(renderPortfolio);
 }
@@ -148,8 +148,7 @@ function renderPortfolio(data) {
 }
 
 function presetFor(eventId) {
-  const householdId = eventId.replace("household_", "");
-  return state.presets.find((preset) => preset.household_id === householdId);
+  return state.presets.find((preset) => preset.portfolio_id === eventId);
 }
 
 function renderStory(preset, kpis) {
@@ -240,8 +239,8 @@ function renderHistory(rows, summary) {
   });
 }
 
-el.householdSelect.addEventListener("change", loadSelectedHousehold);
-el.couponSlots.addEventListener("input", loadSelectedHousehold);
+el.householdSelect.addEventListener("change", loadSelectedPortfolio);
+el.couponSlots.addEventListener("input", loadSelectedPortfolio);
 
 fetch("/api/bootstrap")
   .then((response) => response.json())

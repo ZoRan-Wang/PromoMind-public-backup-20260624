@@ -35,7 +35,7 @@ PORTFOLIO_CATEGORY_CAP = 2
 
 PRESENTATION_PRESETS = [
     {
-        "household_id": "22",
+        "portfolio_id": "22_20171206",
         "label": "Highest-hit portfolio",
         "tag": "HIT 3",
         "story": "Three coupon offers convert while the Top-10 portfolio spans seven categories.",
@@ -43,7 +43,7 @@ PRESENTATION_PRESETS = [
         "coupon_slots": 10,
     },
     {
-        "household_id": "1074",
+        "portfolio_id": "1074_20171206",
         "label": "Cheese repeat basket",
         "tag": "HIT 3",
         "story": "Repeat cheese and refrigerated dough offers convert inside a broader household grocery portfolio.",
@@ -51,15 +51,15 @@ PRESENTATION_PRESETS = [
         "coupon_slots": 10,
     },
     {
-        "household_id": "955",
+        "portfolio_id": "955_20171115",
         "label": "Baby-food repeat",
-        "tag": "HIT 2",
-        "story": "Baby-food history and juice offers produce observed purchases across two campaigns.",
+        "tag": "HIT 4",
+        "story": "Baby-food history produces four observed purchases in the active coupon window.",
         "tone": "hit",
         "coupon_slots": 10,
     },
     {
-        "household_id": "67",
+        "portfolio_id": "67_20171206",
         "label": "Diverse no-hit portfolio",
         "tag": "NO HIT",
         "story": "The portfolio covers nine categories and gives a clear non-conversion example.",
@@ -67,7 +67,7 @@ PRESENTATION_PRESETS = [
         "coupon_slots": 10,
     },
     {
-        "household_id": "1216",
+        "portfolio_id": "1216_20171127",
         "label": "Reasonable miss laundry",
         "tag": "NO HIT",
         "story": "Laundry detergent is a stock-up category with sensible intent and no immediate response.",
@@ -75,7 +75,7 @@ PRESENTATION_PRESETS = [
         "coupon_slots": 10,
     },
     {
-        "household_id": "1142",
+        "portfolio_id": "1142_20171206",
         "label": "Reasonable miss cards",
         "tag": "NO HIT",
         "story": "Greeting cards and soap are occasion-driven offers with sensible fit and no immediate purchase.",
@@ -130,7 +130,7 @@ class DemoData:
         self.product_lookup = self._build_product_lookup()
         self.events = self._build_events()
         self.demo_events = self._build_demo_events()
-        self.household_portfolios = self._build_household_portfolios()
+        self.rolling_portfolios = self._build_rolling_portfolios()
         self.household_history = self._build_household_history()
         self.metric_summary = self._build_metric_summary()
 
@@ -164,25 +164,38 @@ class DemoData:
             rows.sort(key=lambda item: as_int(item["rank"]))
         return dict(sorted(grouped.items()))
 
-    def _build_household_portfolios(self) -> dict[str, list[dict[str, str]]]:
-        grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
+    def _build_rolling_portfolios(self) -> dict[str, list[dict[str, str]]]:
+        grouped: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
         for row in self.recommendations:
             if row.get("split") == "test" and as_bool(row["coupon_eligible"]):
-                grouped[row["household_id"]].append(row)
+                grouped[(row["household_id"], row["coupon_start_date"])].append(row)
 
         portfolios = {}
-        for household_id, rows in grouped.items():
+        for (household_id, coupon_start_date), rows in grouped.items():
             unique_rows = self._dedupe_best_product_rows(rows)
             picked_rows = self._pick_diverse_rows(
                 unique_rows,
                 PORTFOLIO_LIMIT,
                 PORTFOLIO_CATEGORY_CAP,
             )
-            portfolios[household_id] = [
+            portfolio_id = self.portfolio_id(household_id, coupon_start_date)
+            portfolios[portfolio_id] = [
                 dict(row, portfolio_rank=str(rank))
                 for rank, row in enumerate(picked_rows, start=1)
             ]
-        return dict(sorted(portfolios.items(), key=lambda item: as_int(item[0])))
+        return dict(
+            sorted(
+                portfolios.items(),
+                key=lambda item: (
+                    item[1][0]["coupon_start_date"],
+                    as_int(item[1][0]["household_id"]),
+                ),
+            )
+        )
+
+    @staticmethod
+    def portfolio_id(household_id: str, coupon_start_date: str) -> str:
+        return f"{household_id}_{coupon_start_date.replace('-', '')}"
 
     @staticmethod
     def _dedupe_best_product_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -246,7 +259,7 @@ class DemoData:
         return grouped
 
     def _relevant_households(self) -> set[str]:
-        households = set(self.household_portfolios)
+        households = {rows[0]["household_id"] for rows in self.rolling_portfolios.values()}
         for rows in self.events.values():
             households.add(rows[0]["household_id"])
         for rows in self.demo_events.values():
@@ -286,13 +299,16 @@ class DemoData:
             "positive_event_hit_rate_at_20": as_float(row["positive_event_hit_rate_at_20"]),
         }
 
-    def household_options(self) -> list[dict[str, object]]:
+    def portfolio_options(self) -> list[dict[str, object]]:
         options = []
-        for household_id, rows in self.household_portfolios.items():
+        for portfolio_id, rows in self.rolling_portfolios.items():
+            first = rows[0]
             top10 = rows[:10]
             options.append(
                 {
-                    "household_id": as_int(household_id),
+                    "portfolio_id": portfolio_id,
+                    "household_id": as_int(first["household_id"]),
+                    "coupon_start_date": first["coupon_start_date"],
                     "campaign_count": len({as_int(row["campaign_id"]) for row in rows}),
                     "category_count": len({row["product_category"] for row in top10}),
                     "top_product_category": top10[0]["product_category"],
@@ -306,6 +322,7 @@ class DemoData:
             key=lambda row: (
                 -as_int(str(row["positive_in_top10"])),
                 -as_int(str(row["category_count"])),
+                str(row["coupon_start_date"]),
                 as_int(str(row["household_id"])),
             )
         )
@@ -363,23 +380,22 @@ class DemoData:
         demo_options.sort(key=lambda row: as_int(str(row["household_id"])))
         return final_options + demo_options
 
-    def portfolio_payload(self, household_id: str, coupon_slots: int) -> dict[str, object]:
-        rows = self.household_portfolios[household_id]
+    def portfolio_payload(self, portfolio_id: str, coupon_slots: int) -> dict[str, object]:
+        rows = self.rolling_portfolios[portfolio_id]
         first = rows[0]
         top20 = rows[:20]
         top10 = rows[:10]
-        offer_dates = sorted({row["coupon_start_date"] for row in rows})
-        offer_window = offer_dates[0] if len(offer_dates) == 1 else f"{offer_dates[0]} to {offer_dates[-1]}"
-        history, history_summary = self.recent_history(first["household_id"], offer_dates[-1])
+        coupon_start_date = first["coupon_start_date"]
+        history, history_summary = self.recent_history(first["household_id"], coupon_start_date)
         return {
             "event": {
-                "event_id": f"household_{household_id}",
+                "event_id": portfolio_id,
                 "household_id": as_int(first["household_id"]),
                 "campaign_id": 0,
-                "campaign_type": "Household portfolio",
+                "campaign_type": "Rolling household portfolio",
                 "campaign_count": len({as_int(row["campaign_id"]) for row in rows}),
                 "category_count": len({row["product_category"] for row in top10}),
-                "coupon_start_date": offer_window,
+                "coupon_start_date": coupon_start_date,
                 "predicted_purchase_time": "next five-day response window",
                 "model_name": "coupon_response_tail_fusion",
             },
@@ -443,8 +459,8 @@ class DemoData:
     def has_event(self, event_id: str) -> bool:
         return event_id in self.events or event_id in self.demo_events
 
-    def has_household(self, household_id: str) -> bool:
-        return household_id in self.household_portfolios
+    def has_portfolio(self, portfolio_id: str) -> bool:
+        return portfolio_id in self.rolling_portfolios
 
     def demo_payload(self, event_id: str, coupon_slots: int) -> dict[str, object]:
         rows = self.demo_events[event_id]
@@ -596,7 +612,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(
                 {
                     "metrics": DATA.metric_summary,
-                    "households": DATA.household_options(),
+                    "portfolios": DATA.portfolio_options(),
                     "events": DATA.event_options(),
                     "presets": PRESENTATION_PRESETS,
                 }
@@ -604,13 +620,13 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/recommendations":
             query = parse_qs(parsed.query)
             coupon_slots = as_int(query.get("coupon_slots", ["3"])[0])
-            if "household_id" in query:
-                household_id = query["household_id"][0]
-                if not DATA.has_household(household_id):
+            if "portfolio_id" in query:
+                portfolio_id = query["portfolio_id"][0]
+                if not DATA.has_portfolio(portfolio_id):
                     self.send_response(404)
                     self.end_headers()
                     return
-                self.send_json(DATA.portfolio_payload(household_id, coupon_slots))
+                self.send_json(DATA.portfolio_payload(portfolio_id, coupon_slots))
             else:
                 event_id = query["event_id"][0]
                 if not DATA.has_event(event_id):

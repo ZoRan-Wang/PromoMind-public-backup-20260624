@@ -3,24 +3,24 @@
 ## Version
 
 - Date: 2026-06-24
-- Version: v0.6
+- Version: v0.7
 - Scope: local HTML frontend plus Python backend for the final presentation demo
 
 ## Visual Thesis
 
-An operational retail-marketing workspace with calm grocery colors, dense ranking evidence, and immediate household coupon-portfolio controls.
+An operational retail-marketing workspace with calm grocery colors, dense ranking evidence, and immediate rolling household coupon-portfolio controls.
 
 ## Content Plan
 
-- Control surface: choose household and coupon-offer count.
+- Control surface: choose household, coupon window, and coupon-offer count.
 - Evidence surface: show final Recall@10, NDCG@10, and Positive Hit@10.
-- Recommendation surface: show Top-20 household coupon offers with coupon flags, observed hit evidence, campaign source, and reason text.
+- Recommendation surface: show Top-20 time-bounded household coupon offers with coupon flags, observed hit evidence, campaign source, and reason text.
 - Context surface: show recent household purchase history before the selected coupon window.
 - Model comparison surface: show held-out test Positive Hit@10 across baseline, XGBoost LTR, and final tail fusion.
 
 ## Interaction Thesis
 
-- Changing the selected household updates all context, history, recommendations, and KPIs.
+- Changing the selected household-window updates all context, history, recommendations, and KPIs.
 - Moving the coupon slot slider updates coupon flags immediately.
 - Recommendation rows reveal product, category, score, observed outcome, and concise explanation in one scan.
 - Presentation presets switch directly between high-hit households and reasonable no-hit households.
@@ -113,9 +113,9 @@ The second tail-fusion command restores `outputs/reranked_recommendations.csv` a
 ## API
 
 - `GET /api/bootstrap`
-  - returns final metrics and selectable household portfolios
-- `GET /api/recommendations?household_id=<household_id>&coupon_slots=<n>`
-  - returns selected household context, KPIs, history rows, and Top-20 coupon offers
+  - returns final metrics and selectable rolling household portfolios
+- `GET /api/recommendations?portfolio_id=<household_id_yyyymmdd>&coupon_slots=<n>`
+  - returns selected household-window context, KPIs, history rows, and Top-20 coupon offers
 
 ## Test Log
 
@@ -131,4 +131,5 @@ The second tail-fusion command restores `outputs/reranked_recommendations.csv` a
 - v0.3 verification: browser clicks passed for `955_19_20171115`, `1216_20_20171127`, and `1142_22_20171206`; fresh browser error and warning logs were empty.
 - v0.4: connected real household purchase history from `transactions_clean.csv` and `product_features.csv` for every selected event.
 - v0.5: regenerated demo artifacts after merging Zixun's cleaning pipeline; final tail fusion now reports Recall@10 0.4138, NDCG@10 0.3225, and Positive Hit@10 53.21%.
-- v0.6: main demo output is household-level coupon portfolios. The backend aggregates test coupon candidates by household, deduplicates products, caps Top-10 category repetition at two offers per category, and serves `GET /api/recommendations?household_id=<household_id>&coupon_slots=<n>`.
+- v0.6: main demo output is household-level coupon portfolios. The backend aggregates test coupon candidates by household, deduplicates products, and caps Top-10 category repetition at two offers per category.
+- v0.7: main demo output is rolling household coupon portfolios keyed by `household_id + coupon_start_date`. The backend keeps each basket aligned with currently active coupon offers for the selected coupon window.
