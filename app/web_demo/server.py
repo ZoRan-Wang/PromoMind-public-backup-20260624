@@ -621,6 +621,11 @@ class DemoData:
         for row in top10:
             recommendations_by_category[row["product_category"]].append(row)
 
+        hit_cases = [
+            self.hit_case_payload(row)
+            for row in top10
+            if as_bool(row["success_within_5d_observed"])
+        ]
         exact_cases = []
         same_category_cases = []
         category_only_cases = []
@@ -662,11 +667,30 @@ class DemoData:
             "late_exact_product": len(exact_products) > 0,
             "late_same_category": len(same_categories) > 0,
             "late_category_only": len(category_only_categories) > 0,
+            "hit_case_count": len(hit_cases),
             "exact_product_case_count": len(exact_products),
             "same_category_case_count": len(same_categories),
             "category_only_case_count": len(category_only_categories),
+            "hit_cases": hit_cases[:LATE_CASE_LIMIT],
             "exact_product_cases": exact_cases[:LATE_CASE_LIMIT],
             "same_category_cases": display_category_cases[:LATE_CASE_LIMIT],
+        }
+
+    @staticmethod
+    def hit_case_payload(recommended: dict[str, str]) -> dict[str, object]:
+        return {
+            "kind": "5-day hit",
+            "timing_text": "inside response window",
+            "purchase_time": recommended["observed_purchase_time"],
+            "recommended_rank": as_int(recommended.get("portfolio_rank", recommended["rank"])),
+            "recommended_product_id": as_int(recommended["product_id"]),
+            "recommended_product_name": recommended["product_name"],
+            "recommended_category": recommended["product_category"],
+            "purchased_product_id": as_int(recommended["product_id"]),
+            "purchased_product_name": recommended["product_name"],
+            "purchased_category": recommended["product_category"],
+            "same_product": True,
+            "sales_value": "",
         }
 
     @staticmethod
@@ -679,6 +703,7 @@ class DemoData:
         purchase_time = parse_time(str(purchase["purchase_time"]))
         return {
             "kind": kind,
+            "timing_text": f"{round((purchase_time - window_end).total_seconds() / 86400, 1)} days after window",
             "days_after_window": round((purchase_time - window_end).total_seconds() / 86400, 1),
             "purchase_time": str(purchase["purchase_time"]),
             "recommended_rank": as_int(recommended.get("portfolio_rank", recommended["rank"])),

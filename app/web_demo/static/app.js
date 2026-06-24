@@ -372,20 +372,20 @@ function renderLateEvidence(evidence) {
   const global = state.metrics.late_evidence;
   text(
     el.lateEvidenceMeta,
-    `${global.late_exact_product_windows}/${global.no_hit_windows} late SKU - ${global.late_same_category_windows}/${global.no_hit_windows} late category`,
+    `Window ends ${evidence.response_window_end} - no-hit late SKU ${pct(global.late_exact_product_rate)} - late category ${pct(global.late_same_category_rate)}`,
   );
-
-  const status = evidence.is_no_hit_window
-    ? `No 5-day exact hit. Window ended ${evidence.response_window_end}.`
-    : `This window already has a 5-day exact hit. Window ended ${evidence.response_window_end}.`;
-  const statusCard = child("article", "late-evidence-card late-evidence-status");
-  statusCard.append(child("span", "late-evidence-kicker", "Window status"));
-  statusCard.append(child("strong", "", status));
-  el.lateEvidenceCards.append(statusCard);
 
   el.lateEvidenceCards.append(
     lateCaseCard(
-      "Later exact product",
+      "5-day SKU hits",
+      `${evidence.hit_case_count} Top-10 SKUs`,
+      evidence.hit_cases,
+      "No Top-10 SKU was purchased inside this coupon response window.",
+    ),
+  );
+  el.lateEvidenceCards.append(
+    lateCaseCard(
+      "Later exact SKU",
       `${evidence.exact_product_case_count} Top-10 products`,
       evidence.exact_product_cases,
       "No later purchase of the exact recommended Top-10 products.",
@@ -417,12 +417,13 @@ function lateCaseCard(title, countLabel, rows, emptyText) {
   rows.forEach((row, index) => {
     const item = child("li");
     item.style.setProperty("--i", index);
-    const tag = child("span", row.same_product ? "case-tag case-exact" : "case-tag case-category", row.kind);
+    const tag = child("span", caseTagClass(row), row.kind);
     const titleLine = child("strong", "", row.purchased_product_name);
+    const saleText = row.sales_value === "" || row.sales_value === null ? "" : ` - $${Number(row.sales_value).toFixed(2)}`;
     const purchase = child(
       "span",
       "",
-      `${row.purchase_time.replace("T", " ")} - ${Number(row.days_after_window).toFixed(1)} days after window - ${row.purchased_category} - $${Number(row.sales_value).toFixed(2)}`,
+      `${row.purchase_time.replace("T", " ")} - ${row.timing_text} - ${row.purchased_category}${saleText}`,
     );
     const matched = child(
       "small",
@@ -434,6 +435,13 @@ function lateCaseCard(title, countLabel, rows, emptyText) {
   });
   card.append(list);
   return card;
+}
+
+function caseTagClass(row) {
+  if (row.kind === "5-day hit") {
+    return "case-tag case-hit";
+  }
+  return row.same_product ? "case-tag case-exact" : "case-tag case-category";
 }
 
 el.householdSelect.addEventListener("change", () => {

@@ -7,3 +7,4 @@
 - 2026-06-24: Updated the web demo output layer to rolling household coupon portfolios keyed by household and coupon start date.
 - 2026-06-24: Revised the web demo controls to household selection plus coupon-window slider, with fixed Top-10 offers from the full active coupon-eligible pool.
 - 2026-06-24: Added web demo late-evidence cases showing no-hit windows with later exact-product and same-category purchases, plus new late-evidence shortcuts.
+- 2026-06-24: Moved web demo outcome evidence under the Top-10 recommendation table and added concrete 5-day SKU hit cases for hit windows.

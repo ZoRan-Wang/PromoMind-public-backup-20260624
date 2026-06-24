@@ -3,7 +3,7 @@
 ## Version
 
 - Date: 2026-06-24
-- Version: v0.11
+- Version: v0.12
 - Scope: local HTML frontend plus Python backend for the final presentation demo
 
 ## Visual Thesis
@@ -16,7 +16,7 @@ An operational retail-marketing workspace with calm grocery colors, dense rankin
 - Evidence surface: show final Recall@10, NDCG@10, and Positive Hit@10.
 - Recommendation surface: show Top-10 time-bounded household coupon offers with coupon flags, observed hit evidence, campaign source, and reason text.
 - Context surface: show recent household purchase history before the selected coupon window.
-- Late-evidence surface: show no-hit aggregate late SKU/category rates and concrete follow-up purchase cases for the selected household-window.
+- Outcome-evidence surface: show 5-day hit SKUs, no-hit aggregate late SKU/category rates, and concrete follow-up purchase cases for the selected household-window.
 - Model comparison surface: show held-out test Positive Hit@10 across baseline, XGBoost LTR, and final tail fusion.
 
 ## Interaction Thesis
@@ -142,3 +142,6 @@ The second tail-fusion command restores `outputs/reranked_recommendations.csv` a
 - v0.11 verification: `python -m compileall app\web_demo\server.py`, `node --check app\web_demo\static\app.js`, and `python -m pytest -q` passed.
 - v0.11 verification: `/api/bootstrap` returned 12 shortcuts across high-hit, late exact product, late same category, and low-hit groups.
 - v0.11 verification: browser check on `http://127.0.0.1:8766/` showed No-hit late SKU 24.96%, No-hit late category 68.19%, concrete cases for `1703_20171115`, and zero console errors or warnings.
+- v0.12: moved outcome evidence directly under the Top-10 recommendation table and added concrete 5-day SKU hit cases for hit windows.
+- v0.12 verification: `python -m compileall app\web_demo\server.py`, `node --check app\web_demo\static\app.js`, and `python -m pytest -q` passed.
+- v0.12 verification: API checks showed `955_20171115` has four observed Top-10 hits and returns visible hit SKU cases; browser DOM check confirmed the evidence block is inside the recommendation area and console logs are clean.
