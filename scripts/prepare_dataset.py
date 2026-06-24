@@ -23,12 +23,13 @@ if str(SRC_ROOT) not in sys.path:
 
 from promomind.data import schema  # noqa: E402
 from promomind.data.preprocess import (  # noqa: E402
+    apply_product_catalog,
     build_household_features,
     build_product_features,
     clean_transactions,
-    filter_frequent_products,
     join_promotion_placeholders,
     read_optional_csv,
+    select_products_from_train,
     time_based_split,
     week_based_split,
 )
@@ -76,27 +77,32 @@ def main() -> int:
     products = read_optional_csv(raw_dir / schema.RAW_FILENAMES["products"])
     demographics = read_optional_csv(raw_dir / schema.RAW_FILENAMES["demographics"])
     promotions = read_optional_csv(raw_dir / schema.RAW_FILENAMES["promotions"])
-    coupons = read_optional_csv(raw_dir / schema.RAW_FILENAMES["coupons"])
-    coupon_redemptions = read_optional_csv(raw_dir / schema.RAW_FILENAMES["coupon_redemptions"])
 
     transactions_clean = clean_transactions(transactions)
-    transactions_clean = filter_frequent_products(
-        transactions_clean,
-        min_product_purchases=args.min_product_purchases,
-        top_products=args.top_products,
-    )
-
     if args.split_mode == "week" and schema.WEEK in transactions_clean.columns:
         train, val, test = week_based_split(transactions_clean)
     else:
         train, val, test = time_based_split(transactions_clean)
-    product_features = build_product_features(transactions_clean, products)
-    household_features = build_household_features(transactions_clean, demographics)
+
+    selected_products = select_products_from_train(
+        train,
+        min_product_purchases=args.min_product_purchases,
+        top_products=args.top_products,
+    )
+    train = apply_product_catalog(train, selected_products)
+    val = apply_product_catalog(val, selected_products)
+    test = apply_product_catalog(test, selected_products)
+    transactions_clean = pd.concat([train, val, test], ignore_index=True)
+
+    product_features = build_product_features(train, products)
+    household_features = build_household_features(train, demographics)
     transactions_with_promotions = join_promotion_placeholders(
         transactions_clean,
         promotions=promotions,
-        coupons=coupons,
-        coupon_redemptions=coupon_redemptions,
+        # Coupon eligibility requires campaign-aware joins. Redemptions are
+        # post-treatment outcomes and must not be attached across future weeks.
+        coupons=None,
+        coupon_redemptions=None,
     )
 
     outputs = {

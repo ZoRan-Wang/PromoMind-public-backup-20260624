@@ -85,7 +85,13 @@ Generate a tiny synthetic dataset for smoke tests:
 python scripts/make_sample_data.py
 ```
 
-Prepare processed files from CSV exports in `data/raw/`:
+Clean the committed RDS/RDA data into local processed files:
+
+```bash
+python scripts/clean_completejourney.py
+```
+
+For optional CSV exports in `data/raw/`, use:
 
 ```bash
 python scripts/prepare_dataset.py --raw-dir data/raw --processed-dir data/processed
