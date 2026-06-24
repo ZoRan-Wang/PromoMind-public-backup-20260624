@@ -44,16 +44,13 @@ Not committed:
 - `data/processed/`
 - local raw CSV exports under `data/raw/*.csv`
 
-Those folders are intentionally ignored because some files are large. Regenerate them locally when needed.
+Those folders are intentionally ignored because some files are large. Restore them from GitHub-committed cache packages when needed:
 
-Large generated artifacts are also available on Google Drive:
+```powershell
+python scripts/restore_local_artifacts.py --clean
+```
 
-- Folder: <https://drive.google.com/drive/folders/12K-x6t3J-1JQWSQqNrdeRbbRqedNpAHd>
-- Final outputs package: <https://drive.google.com/file/d/1K-Doro51f55lpWCWSSSEo60aqkhWNU9h/view?usp=drivesdk>
-- Raw CSV cache package: <https://drive.google.com/file/d/1BAqzSp6x6-V8QYk-e5eC-_btKuQ3Vgy8/view?usp=drivesdk>
-- Processed cache package: <https://drive.google.com/file/d/1_fJivrUgHJ-bq8CQEld8VeX17S_5XMd2/view?usp=drivesdk>
-
-The Drive folder is shared read-only to anyone with the link.
+The ZIP packages live under `artifacts/local_cache/` and are split to stay below GitHub's 100MB file limit.
 
 ## Setup
 
@@ -134,7 +131,13 @@ Open:
 http://127.0.0.1:8766/
 ```
 
-This server requires local generated artifacts under `outputs/` and `data/processed/`. Those folders are ignored by Git. Use `docs/zixun_cleaning_pipeline.md` to regenerate them, or restore them from the shared Drive packages.
+This server requires local generated artifacts under `outputs/` and `data/processed/`. Those folders are ignored by Git. Use `docs/zixun_cleaning_pipeline.md` to regenerate them, or restore them from the committed cache packages.
+
+Fast restore from committed cache packages:
+
+```powershell
+python scripts/restore_local_artifacts.py --clean
+```
 
 One-command rebuild from committed source files:
 

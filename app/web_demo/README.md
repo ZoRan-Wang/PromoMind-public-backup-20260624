@@ -85,10 +85,10 @@ python scripts/build_web_demo_artifacts.py --run-checks
 
 Fast path:
 
-1. Download the Drive output and processed packages from the root README.
-2. Put extracted output files under `outputs/`.
-3. Put extracted processed files under `data/processed/`.
-4. Run `python app/web_demo/server.py --port 8766`.
+```powershell
+python scripts/restore_local_artifacts.py --clean
+python app/web_demo/server.py --port 8766
+```
 
 Manual rebuild path:
 

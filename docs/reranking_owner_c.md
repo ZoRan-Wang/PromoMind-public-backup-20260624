@@ -11,7 +11,11 @@ source venv/bin/activate          # macOS / Linux
 venv\Scripts\activate             # Windows
 ```
 
-The following files must exist in `outputs/` before running. Download them from the Google Drive package if missing (link in `docs/next_flow_handoff.md`):
+The following files must exist in `outputs/` before running. Restore them from committed cache packages if missing:
+
+```powershell
+python scripts/restore_local_artifacts.py --clean
+```
 
 | File | Source |
 |---|---|

@@ -24,6 +24,7 @@ The project predicts products each household is likely to buy next, then re-rank
 | `scripts/` | Dataset export, preprocessing, and synthetic sample-data utilities |
 | `app/` | Streamlit demo shell |
 | `data/` | Complete Journey raw RDS/RDA files plus ignored generated processed outputs |
+| `artifacts/local_cache/` | GitHub-committed ZIP cache packages for ignored generated artifacts |
 | `rendered/` | Rendered DOCX page images used for layout QA |
 
 ## Current Handoff
@@ -37,16 +38,21 @@ Use `deliverables/final_solution_2026_06_24/` for final-presentation materials:
 - `final_metrics.csv`
 - `top10_recommendation_sample.csv`
 
-## Google Drive Artifacts
+## Local Artifact Packages
 
-Generated outputs and large CSV caches are stored on Google Drive instead of GitHub:
+Generated outputs and large CSV caches are committed as split ZIP packages under `artifacts/local_cache/`. Restore them after cloning:
 
-- [PromoMind Final Artifacts folder](https://drive.google.com/drive/folders/12K-x6t3J-1JQWSQqNrdeRbbRqedNpAHd)
-- [Final outputs package](https://drive.google.com/file/d/1K-Doro51f55lpWCWSSSEo60aqkhWNU9h/view?usp=drivesdk): final `outputs/reranked_recommendations.csv`, model-comparison CSVs, search CSVs, final docs, and presentation-ready snapshots.
-- [Raw CSV cache package](https://drive.google.com/file/d/1BAqzSp6x6-V8QYk-e5eC-_btKuQ3Vgy8/view?usp=drivesdk): local `data/raw/*.csv` exports from The Complete Journey.
-- [Processed cache package](https://drive.google.com/file/d/1_fJivrUgHJ-bq8CQEld8VeX17S_5XMd2/view?usp=drivesdk): local `data/processed/*.csv` files.
+```bash
+python scripts/restore_local_artifacts.py --clean
+```
 
-The Drive folder is shared read-only to anyone with the link. Use the final outputs package when you want to run the Streamlit demo without regenerating all model artifacts. Use the raw/processed cache packages only when you want to skip local R export or preprocessing.
+This restores:
+
+- `outputs/`
+- `data/processed/`
+- local raw CSV exports under `data/raw/*.csv`
+
+The packages are split so every tracked file stays below GitHub's 100MB file limit. See `artifacts/local_cache/README.md`.
 
 ## Proposed Project
 
@@ -95,6 +101,12 @@ Build every local artifact required by the browser demo from committed source fi
 
 ```bash
 python scripts/build_web_demo_artifacts.py
+```
+
+Restore prebuilt local artifacts from GitHub-committed cache packages:
+
+```bash
+python scripts/restore_local_artifacts.py --clean
 ```
 
 For optional CSV exports in `data/raw/`, use:
@@ -207,7 +219,13 @@ The HTML/CSS/JS UI is committed under `app/web_demo/`. A fresh clone still needs
 - `outputs/coupon_response_final_model_comparison.csv`
 - `outputs/coupon_response_heuristic_model_comparison_zixun.csv`
 
-Regenerate those files directly from the committed RDS/RDA source files:
+Restore those files from GitHub-committed cache packages:
+
+```bash
+python scripts/restore_local_artifacts.py --clean
+```
+
+Or regenerate them directly from the committed RDS/RDA source files:
 
 ```bash
 python scripts/build_web_demo_artifacts.py
