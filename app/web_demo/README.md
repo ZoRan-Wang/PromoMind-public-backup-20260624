@@ -3,7 +3,7 @@
 ## Version
 
 - Date: 2026-06-24
-- Version: v0.7
+- Version: v0.8
 - Scope: local HTML frontend plus Python backend for the final presentation demo
 
 ## Visual Thesis
@@ -133,3 +133,4 @@ The second tail-fusion command restores `outputs/reranked_recommendations.csv` a
 - v0.5: regenerated demo artifacts after merging Zixun's cleaning pipeline; final tail fusion now reports Recall@10 0.4138, NDCG@10 0.3225, and Positive Hit@10 53.21%.
 - v0.6: main demo output is household-level coupon portfolios. The backend aggregates test coupon candidates by household, deduplicates products, and caps Top-10 category repetition at two offers per category.
 - v0.7: main demo output is rolling household coupon portfolios keyed by `household_id + coupon_start_date`. The backend keeps each basket aligned with currently active coupon offers for the selected coupon window.
+- v0.8: default portfolio ordering prioritizes multi-category coupon baskets with observed hits. The opening sample is `22_20171206`, with 3 observed Top-10 hits across 7 product categories.

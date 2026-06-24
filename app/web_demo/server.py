@@ -51,10 +51,10 @@ PRESENTATION_PRESETS = [
         "coupon_slots": 10,
     },
     {
-        "portfolio_id": "955_20171115",
-        "label": "Baby-food repeat",
-        "tag": "HIT 4",
-        "story": "Baby-food history produces four observed purchases in the active coupon window.",
+        "portfolio_id": "46_20171206",
+        "label": "Cards and juice mix",
+        "tag": "HIT 2",
+        "story": "Greeting-card and refrigerated-juice offers convert inside a seven-category basket.",
         "tone": "hit",
         "coupon_slots": 10,
     },
@@ -320,8 +320,9 @@ class DemoData:
             )
         options.sort(
             key=lambda row: (
-                -as_int(str(row["positive_in_top10"])),
+                -int(as_int(str(row["positive_in_top10"])) >= 2),
                 -as_int(str(row["category_count"])),
+                -as_int(str(row["positive_in_top10"])),
                 str(row["coupon_start_date"]),
                 as_int(str(row["household_id"])),
             )
