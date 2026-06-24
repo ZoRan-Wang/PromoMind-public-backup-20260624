@@ -197,7 +197,7 @@ Run tests:
 pytest
 ```
 
-Run the presentation web demo:
+Run the presentation web demo for household-level coupon portfolios:
 
 ```bash
 python app/web_demo/server.py --port 8766

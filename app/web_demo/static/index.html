@@ -14,20 +14,20 @@
           <span class="brand-mark">PM</span>
           <div>
             <p class="eyebrow">PromoMind</p>
-            <h1>Coupon Response Ranking Demo</h1>
+            <h1>Household Coupon Portfolio Demo</h1>
           </div>
           <p class="caption">
-            Local browser interface for household-campaign coupon product ranking.
+            Local browser interface for household-level coupon offer selection.
           </p>
         </div>
 
         <label class="control">
-          <span>Household / campaign event</span>
-          <select id="eventSelect"></select>
+          <span>Household</span>
+          <select id="householdSelect"></select>
         </label>
 
         <label class="control">
-          <span>Coupon slots</span>
+          <span>Coupon offers</span>
           <input id="couponSlots" type="range" min="0" max="10" value="3" />
           <strong id="couponSlotsValue">3</strong>
         </label>
@@ -59,8 +59,8 @@
       <section class="workspace">
         <header class="topbar">
           <div>
-            <p class="eyebrow">Selected event</p>
-            <h2 id="eventTitle">Loading event</h2>
+            <p class="eyebrow">Selected household</p>
+            <h2 id="eventTitle">Loading household</h2>
           </div>
           <div class="status-row">
             <span id="campaignType">-</span>
@@ -68,18 +68,18 @@
           </div>
         </header>
 
-        <section class="story-strip" aria-label="Selected event storyline">
+        <section class="story-strip" aria-label="Selected household storyline">
           <span id="storyTag">-</span>
-          <p id="storyText">Loading selected event.</p>
+          <p id="storyText">Loading selected household.</p>
         </section>
 
-        <section class="kpis" aria-label="Selected event KPIs">
+        <section class="kpis" aria-label="Selected household KPIs">
           <div>
-            <span>Coupon start</span>
+            <span>Coupon window</span>
             <strong id="couponStart">-</strong>
           </div>
           <div>
-            <span>Predicted purchase</span>
+            <span>Prediction target</span>
             <strong id="predictedPurchase">-</strong>
           </div>
           <div>
@@ -87,7 +87,7 @@
             <strong id="top10Hits">-</strong>
           </div>
           <div>
-            <span>Coupon eligible in slots</span>
+            <span>Categories in Top-10</span>
             <strong id="eligibleSlots">-</strong>
           </div>
         </section>
@@ -97,7 +97,7 @@
             <div class="section-heading">
               <div>
                 <p class="eyebrow">Output</p>
-                <h3 id="recommendationTitle">Top coupon product recommendations</h3>
+                <h3 id="recommendationTitle">Household coupon offer portfolio</h3>
               </div>
               <span id="avgScore" class="small-stat">-</span>
             </div>
@@ -108,7 +108,7 @@
                     <th>Rank</th>
                     <th>Product</th>
                     <th>Score</th>
-                    <th>Coupon</th>
+                    <th>Offer</th>
                     <th>Observed</th>
                   </tr>
                 </thead>

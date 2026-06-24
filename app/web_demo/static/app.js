@@ -1,11 +1,11 @@
 const state = {
-  events: [],
+  households: [],
   presets: [],
   metrics: null,
 };
 
 const el = {
-  eventSelect: document.querySelector("#eventSelect"),
+  householdSelect: document.querySelector("#householdSelect"),
   couponSlots: document.querySelector("#couponSlots"),
   couponSlotsValue: document.querySelector("#couponSlotsValue"),
   presetButtons: document.querySelector("#presetButtons"),
@@ -52,24 +52,24 @@ function child(tag, className, value) {
 }
 
 function setBootstrap(data) {
-  state.events = data.events;
+  state.households = data.households;
   state.presets = data.presets;
   state.metrics = data.metrics;
-  renderEventOptions();
+  renderHouseholdOptions();
   renderPresets();
   renderHeadlineMetrics();
   renderMetricBars();
-  loadSelectedEvent();
+  loadSelectedHousehold();
 }
 
-function renderEventOptions() {
-  el.eventSelect.replaceChildren();
-  state.events.forEach((event) => {
+function renderHouseholdOptions() {
+  el.householdSelect.replaceChildren();
+  state.households.forEach((household) => {
     const option = document.createElement("option");
-    const prefix = event.positive_in_top10 > 0 ? `HIT ${event.positive_in_top10}` : event.event_group === "history_showcase" ? "HISTORY" : "NO HIT";
-    option.value = event.event_id;
-    option.textContent = `${prefix} - HH ${event.household_id} - Campaign ${event.campaign_id} - ${event.top_product_category}`;
-    el.eventSelect.append(option);
+    const prefix = household.positive_in_top10 > 0 ? `HIT ${household.positive_in_top10}` : "NO HIT";
+    option.value = household.household_id;
+    option.textContent = `${prefix} - HH ${household.household_id} - ${household.category_count} categories - ${household.top_product_category}`;
+    el.householdSelect.append(option);
   });
 }
 
@@ -79,16 +79,16 @@ function renderPresets() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `preset-button preset-${preset.tone}`;
-    button.dataset.presetId = preset.event_id;
+    button.dataset.presetId = preset.household_id;
     button.append(child("span", "preset-tag", preset.tag));
     button.append(child("strong", "", preset.label));
     button.append(child("small", "", preset.story));
     button.addEventListener("click", () => {
-      el.eventSelect.value = preset.event_id;
+      el.householdSelect.value = preset.household_id;
       el.couponSlots.value = preset.coupon_slots;
-      loadSelectedEvent();
+      loadSelectedHousehold();
     });
-    if (preset.event_id === el.eventSelect.value) {
+    if (preset.household_id === el.householdSelect.value) {
       button.classList.add("is-active");
     }
     el.presetButtons.append(button);
@@ -120,26 +120,26 @@ function renderMetricBars() {
   });
 }
 
-function loadSelectedEvent() {
-  const eventId = el.eventSelect.value;
+function loadSelectedHousehold() {
+  const householdId = el.householdSelect.value;
   const couponSlots = el.couponSlots.value;
   text(el.couponSlotsValue, couponSlots);
-  fetch(`/api/recommendations?event_id=${encodeURIComponent(eventId)}&coupon_slots=${couponSlots}`)
+  fetch(`/api/recommendations?household_id=${encodeURIComponent(householdId)}&coupon_slots=${couponSlots}`)
     .then((response) => response.json())
-    .then(renderEvent);
+    .then(renderPortfolio);
 }
 
-function renderEvent(data) {
+function renderPortfolio(data) {
   const event = data.event;
   const kpis = data.kpis;
   const preset = presetFor(event.event_id);
-  text(el.eventTitle, `Household ${event.household_id} - Campaign ${event.campaign_id}`);
+  text(el.eventTitle, `Household ${event.household_id}`);
   text(el.campaignType, event.campaign_type);
   text(el.modelName, event.model_name);
   text(el.couponStart, event.coupon_start_date);
   text(el.predictedPurchase, event.predicted_purchase_time.replace("T", " "));
   text(el.top10Hits, `${kpis.top10_observed_success} observed`);
-  text(el.eligibleSlots, `${kpis.coupon_eligible_in_slots} of ${kpis.coupon_slots}`);
+  text(el.eligibleSlots, `${kpis.top10_category_count} categories`);
   text(el.avgScore, `Avg Top-10 score ${score(kpis.avg_top10_score)}`);
   renderStory(preset, kpis);
   renderPresets();
@@ -148,7 +148,8 @@ function renderEvent(data) {
 }
 
 function presetFor(eventId) {
-  return state.presets.find((preset) => preset.event_id === eventId);
+  const householdId = eventId.replace("household_", "");
+  return state.presets.find((preset) => preset.household_id === householdId);
 }
 
 function renderStory(preset, kpis) {
@@ -159,7 +160,7 @@ function renderStory(preset, kpis) {
     el.storyText,
     preset
       ? preset.story
-      : "Held-out test event for live browsing across household-campaign recommendations.",
+      : "Held-out household portfolio for live browsing across coupon offers.",
   );
 }
 
@@ -187,7 +188,7 @@ function renderRecommendations(rows) {
     tr.append(cell(product));
 
     tr.append(cell(child("span", "", score(row.final_score))));
-    tr.append(cell(flag(row.recommend_coupon, row.coupon_eligible)));
+    tr.append(cell(flag(row.recommend_coupon, row.coupon_eligible, row.campaign_id)));
     tr.append(cell(observedFlag(row.observed_success)));
 
     el.recommendationRows.append(tr);
@@ -200,9 +201,9 @@ function cell(content) {
   return td;
 }
 
-function flag(recommended, eligible) {
+function flag(recommended, eligible, campaignId) {
   if (recommended) {
-    return child("span", "flag flag-on", eligible ? "coupon" : "slot");
+    return child("span", "flag flag-on", eligible ? `coupon C${campaignId}` : "slot");
   }
   return child("span", "flag flag-off", eligible ? "eligible" : "no coupon");
 }
@@ -239,8 +240,8 @@ function renderHistory(rows, summary) {
   });
 }
 
-el.eventSelect.addEventListener("change", loadSelectedEvent);
-el.couponSlots.addEventListener("input", loadSelectedEvent);
+el.householdSelect.addEventListener("change", loadSelectedHousehold);
+el.couponSlots.addEventListener("input", loadSelectedHousehold);
 
 fetch("/api/bootstrap")
   .then((response) => response.json())
