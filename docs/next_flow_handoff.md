@@ -136,6 +136,12 @@ http://127.0.0.1:8766/
 
 This server requires local generated artifacts under `outputs/` and `data/processed/`. Those folders are ignored by Git. Use `docs/zixun_cleaning_pipeline.md` to regenerate them, or restore them from the shared Drive packages.
 
+One-command rebuild from committed source files:
+
+```powershell
+python scripts/build_web_demo_artifacts.py
+```
+
 ## Run Legacy Streamlit Demo
 
 ```powershell

@@ -19,6 +19,14 @@ The integrated flow uses train-only product selection and train-only behavioral 
 python scripts/clean_completejourney.py --top-products 10000
 ```
 
+For the full browser demo, run the end-to-end artifact builder:
+
+```powershell
+python scripts/build_web_demo_artifacts.py
+```
+
+This command exports ignored `data/raw/*.csv` from the committed RDS/RDA source files, rebuilds `data/processed/`, reruns the final modeling chain, restores `outputs/reranked_recommendations.csv`, and writes the timing-demo files required by `app/web_demo/server.py`.
+
 ## Generated Local Tables
 
 | File | Rows |

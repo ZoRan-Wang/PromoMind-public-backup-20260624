@@ -91,6 +91,12 @@ Clean the committed RDS/RDA data into local processed files:
 python scripts/clean_completejourney.py --top-products 10000
 ```
 
+Build every local artifact required by the browser demo from committed source files:
+
+```bash
+python scripts/build_web_demo_artifacts.py
+```
+
 For optional CSV exports in `data/raw/`, use:
 
 ```bash
@@ -201,7 +207,13 @@ The HTML/CSS/JS UI is committed under `app/web_demo/`. A fresh clone still needs
 - `outputs/coupon_response_final_model_comparison.csv`
 - `outputs/coupon_response_heuristic_model_comparison_zixun.csv`
 
-Regenerate those files with `docs/zixun_cleaning_pipeline.md`, or download the Drive output/processed packages and place the extracted files back under `outputs/` and `data/processed/`.
+Regenerate those files directly from the committed RDS/RDA source files:
+
+```bash
+python scripts/build_web_demo_artifacts.py
+```
+
+This command also exports ignored `data/raw/*.csv` from `data/raw/completejourney/*.rds/.rda` for scripts that expect CSV inputs.
 
 Run the legacy Streamlit demo:
 

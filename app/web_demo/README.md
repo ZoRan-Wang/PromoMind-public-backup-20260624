@@ -69,6 +69,20 @@ The UI files are tracked in GitHub:
 
 The data files are intentionally ignored by Git. Before starting the server, restore or regenerate the local artifacts listed in the Data Inputs section.
 
+One-command rebuild from committed source files:
+
+```powershell
+python scripts/build_web_demo_artifacts.py
+```
+
+This command starts from `data/raw/completejourney/*.rds/.rda`, exports ignored raw CSVs, rebuilds processed data, reruns models, restores final tail-fusion recommendations, and writes the timing demo files.
+
+Optional verification after generation:
+
+```powershell
+python scripts/build_web_demo_artifacts.py --run-checks
+```
+
 Fast path:
 
 1. Download the Drive output and processed packages from the root README.
@@ -76,7 +90,7 @@ Fast path:
 3. Put extracted processed files under `data/processed/`.
 4. Run `python app/web_demo/server.py --port 8766`.
 
-Rebuild path:
+Manual rebuild path:
 
 ```powershell
 python scripts/clean_completejourney.py --top-products 10000
