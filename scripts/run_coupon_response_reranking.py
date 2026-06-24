@@ -19,7 +19,7 @@ Column mapping from the tail-fusion candidate file:
 
 Outputs
 -------
-outputs/reranked_recommendations.csv        Owner C deliverable: feature scores + final_score + final_rank + recommend_coupon
+outputs/promo_reranked_recommendations.csv        Owner C deliverable: feature scores + final_score + final_rank + recommend_coupon
 outputs/reranking_metrics.csv Evaluation table: Recall, NDCG, Hit, Coverage, ILD, Novelty, BU at K=5,10,20
 
 Usage
@@ -284,7 +284,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--truth", type=Path,
                    default=REPO_ROOT / "outputs" / "coupon_response_all_truth.csv")
     p.add_argument("--outputs-dir", type=Path, default=REPO_ROOT / "outputs")
-    p.add_argument("--output-name", default="reranked_recommendations.csv")
+    p.add_argument("--output-name", default="promo_reranked_recommendations.csv")
     p.add_argument("--eval-split", default="test", choices=["validation", "test", "both"])
     p.add_argument("--eval-k", type=int, nargs="+", default=[5, 10, 20])
     p.add_argument("--alpha", type=float, default=DEFAULT_ALPHA)
@@ -306,6 +306,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    args.outputs_dir.mkdir(parents=True, exist_ok=True)
 
     print("Loading data …")
     cands = pd.read_csv(args.candidates)

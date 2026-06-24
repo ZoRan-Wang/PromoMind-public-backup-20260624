@@ -1,41 +1,41 @@
-# PromoMind Notebook Order
+# PromoMind Part-C Notebooks (Business Reranking & Evaluation)
 
-Use notebooks for exploration and evidence, while reusable logic should move into `src/` once stable.
+These notebooks cover the **promotion-aware business reranking** layer and its evaluation. They sit on top of the modelling pipeline (`XGBoost primary → tail fusion`) and consume its committed candidate files from `outputs/`.
 
-Recommended order:
+## Inputs (produced by the modelling pipeline, see `docs/next_flow_handoff.md`)
 
-1. `01_data_loading_and_schema.ipynb`
-   - Verify raw The Complete Journey tables.
-   - Record exact column names, row counts, primary keys, and join keys.
+- `outputs/candidates_coupon_response_tail_fusion.csv` — the final tail-fusion ranker (the base the reranking builds on).
+- `outputs/coupon_response_all_truth.csv` — ground-truth purchases per event.
 
-2. `02_data_cleaning_and_split.ipynb`
-   - Clean transactions/products.
-   - Apply product/household filters.
-   - Create Week 1-40 train, Week 41-46 validation, and Week 47-53 test files.
+If these are missing after a fresh clone, regenerate them with the reproduction commands in `docs/next_flow_handoff.md`.
 
-3. `03_eda.ipynb`
-   - Produce dataset statistics and PPT-ready figures.
-   - Include coupon redemption sparsity and demographics coverage.
+## Run order
 
-4. `04_candidate_generation.ipynb`
-   - Run popularity, category popularity, ItemKNN, ALS, and optional BPR.
-   - Save candidate files using the shared schema.
+Run the notebooks **in number order** — notebook 1 produces the artifact the other two read.
 
-5. `05_promotion_coupon_features.ipynb`
-   - Validate promotion, campaign, coupon, and redemption joins.
-   - Save promotion, coupon, and discount-cost feature tables.
+1. **`01_discount_penalty_ablation.ipynb`**
+   - Applies the five-term reranking formula (`α·base + β·promotion + γ·coupon − λ·discount_cost + ρ·diversity`) on top of the tail-fusion candidates.
+   - Runs the additive ablation, λ sweep, and grid search.
+   - **Writes `outputs/promo_reranked_recommendations.csv`** (the promotion-aware reranked list) plus `best_reranking_params.json`, `discount_penalty_ablation.csv`, `grid_search_results.csv`.
 
-6. `06_reranking_and_metrics.ipynb`
-   - Run reranking variants.
-   - Compute Recall, NDCG, coverage, diversity, novelty, and Business Utility@K.
-   - Save ablation and final result tables.
+2. **`02_diversity_coverage_novelty.ipynb`**
+   - Reads `promo_reranked_recommendations.csv` and compares it against the tail-fusion baseline.
+   - Computes Coverage@K, Intra-List Diversity@K, and Novelty@K (RQ4).
+   - Writes `outputs/diversity_coverage_novelty.csv`.
 
-7. `07_demo_data_export.ipynb`
-   - Build demo-ready recommendation and household profile extracts.
-   - Check that selected demo households have complete, interpretable rows.
+3. **`03_business_utility_evaluation.ipynb`**
+   - Reads `promo_reranked_recommendations.csv` and computes Business Utility@K (RQ2/RQ3), with a discount-cost sensitivity sweep and a per-campaign-type breakdown.
 
-8. `08_lightgcn_optional.ipynb`
-   - Optional bonus notebook for RecBole/LightGCN experiments.
-   - Must emit the same candidate schema as other models if included.
+## Script equivalent
 
-Notebook output rule: every notebook that creates a shared artifact should end with a short "Outputs written" cell listing filenames, row counts, and any known limitations.
+`scripts/run_coupon_response_reranking.py` reproduces notebook 1's reranking from the command line (same default tail-fusion input, same grid-search winner, writing `promo_reranked_recommendations.csv` and `reranking_metrics.csv`):
+
+```bash
+python scripts/run_coupon_response_reranking.py                       # default params (grid-search winner)
+python scripts/run_coupon_response_reranking.py --grid-search --primary-metric ndcg_at_10
+```
+
+## Notes
+
+- `outputs/` is git-ignored; regenerate locally as needed.
+- Each event has exactly 20 candidates, so K=20 metrics are set-based (identical across rankings of the same pool).
