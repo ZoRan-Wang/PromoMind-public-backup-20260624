@@ -120,13 +120,29 @@ Expected current result:
 compileall passes
 ```
 
-## Run Demo
+## Run Presentation Web Demo
+
+The committed browser demo is under `app/web_demo/`. This is the presentation UI used at `http://127.0.0.1:8766/`.
+
+```powershell
+python app/web_demo/server.py --port 8766
+```
+
+Open:
+
+```text
+http://127.0.0.1:8766/
+```
+
+This server requires local generated artifacts under `outputs/` and `data/processed/`. Those folders are ignored by Git. Use `docs/zixun_cleaning_pipeline.md` to regenerate them, or restore them from the shared Drive packages.
+
+## Run Legacy Streamlit Demo
 
 ```powershell
 streamlit run app/streamlit_app.py
 ```
 
-The demo reads `outputs/reranked_recommendations.csv` when present. If that file is missing after a fresh clone, run the reproduction commands above first.
+The Streamlit page reads `outputs/reranked_recommendations.csv` when present. If that file is missing after a fresh clone, run the reproduction commands above first.
 
 ## What Each Next Teammate Should Do
 

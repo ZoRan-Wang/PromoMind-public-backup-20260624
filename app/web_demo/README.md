@@ -49,14 +49,52 @@ An operational retail-marketing workspace with calm grocery colors, dense rankin
 From the repository root:
 
 ```powershell
-python app/web_demo/server.py --port 8765
+python app/web_demo/server.py --port 8766
 ```
 
 Open:
 
 ```text
-http://127.0.0.1:8765
+http://127.0.0.1:8766/
 ```
+
+## Fresh Clone Setup
+
+The UI files are tracked in GitHub:
+
+- `app/web_demo/server.py`
+- `app/web_demo/static/index.html`
+- `app/web_demo/static/style.css`
+- `app/web_demo/static/app.js`
+
+The data files are intentionally ignored by Git. Before starting the server, restore or regenerate the local artifacts listed in the Data Inputs section.
+
+Fast path:
+
+1. Download the Drive output and processed packages from the root README.
+2. Put extracted output files under `outputs/`.
+3. Put extracted processed files under `data/processed/`.
+4. Run `python app/web_demo/server.py --port 8766`.
+
+Rebuild path:
+
+```powershell
+python scripts/clean_completejourney.py --top-products 10000
+python scripts/run_candidate_models.py --models all --als-backend auto
+python scripts/run_cornac_nbr_models.py
+python scripts/run_sota_ensemble.py
+python scripts/run_coupon_response_xgboost_ranker.py --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20
+Copy-Item outputs/candidates_coupon_response_xgboost_ranker.csv outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv -Force
+python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --use-category-embedding-features
+Copy-Item outputs/candidates_coupon_response_xgboost_ranker.csv outputs/candidates_coupon_response_xgboost_ranker_pf_interval_category_embedding.csv -Force
+python scripts/run_coupon_response_tail_fusion.py --primary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_category_embedding.csv --secondary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv --primary-metric recall_at_20 --selection-profile tail_recall --preserve-min-rank 7 --preserve-max-rank 12
+python scripts/run_coupon_response_ranker.py --reuse-features --device auto --primary-metric ndcg_at_10
+Copy-Item outputs/coupon_response_model_comparison.csv outputs/coupon_response_heuristic_model_comparison_zixun.csv -Force
+python scripts/run_coupon_response_tail_fusion.py --primary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_category_embedding.csv --secondary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv --primary-metric recall_at_20 --selection-profile tail_recall --preserve-min-rank 7 --preserve-max-rank 12
+python scripts/build_coupon_timing_demo.py --demo-events 3 --prediction-length 5 --max-label-rows 5000 --no-bootstrap
+```
+
+The second tail-fusion command restores `outputs/reranked_recommendations.csv` after the heuristic baseline script writes its own ranking output.
 
 ## API
 

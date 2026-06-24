@@ -12,7 +12,7 @@ This file maps the course final-solution requirements to the current PromoMind r
 | Experimental results | `docs/coupon_response_improvement.md`, `deliverables/final_solution_2026_06_24/final_metrics.csv` | Complete |
 | Applicability and significance | `docs/coupon_response_improvement.md`, `deliverables/final_solution_2026_06_24/final_results_summary.md` | Complete |
 | Proposed or attempted extensions with evidence | XGBoost ablations, neural ranker, text embedding, text match, category embedding, rank fusion, tail fusion in `docs/coupon_response_improvement.md` | Complete |
-| Working recommender demo | `app/streamlit_app.py`; run with `streamlit run app/streamlit_app.py` after generating `outputs/reranked_recommendations.csv` | Complete locally |
+| Working recommender demo | `app/web_demo/server.py`; run with `python app/web_demo/server.py --port 8766` after restoring `outputs/` and `data/processed/`; legacy Streamlit remains in `app/streamlit_app.py` | Complete locally |
 | Future work | `docs/coupon_response_improvement.md`, final section; RedNote/NoteLLM, causal uplift, richer product text/images | Complete |
 
 ## Proposal Requirement Coverage

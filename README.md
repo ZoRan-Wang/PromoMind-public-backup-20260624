@@ -179,7 +179,31 @@ Run tests:
 pytest
 ```
 
-Run the demo:
+Run the presentation web demo:
+
+```bash
+python app/web_demo/server.py --port 8766
+```
+
+Open:
+
+```text
+http://127.0.0.1:8766/
+```
+
+The HTML/CSS/JS UI is committed under `app/web_demo/`. A fresh clone still needs ignored local artifacts before the backend can load data:
+
+- `data/processed/transactions_clean.csv`
+- `data/processed/product_features.csv`
+- `outputs/reranked_recommendations.csv`
+- `outputs/demo_time_name_recommendations.csv`
+- `outputs/coupon_response_tail_fusion_model_comparison.csv`
+- `outputs/coupon_response_final_model_comparison.csv`
+- `outputs/coupon_response_heuristic_model_comparison_zixun.csv`
+
+Regenerate those files with `docs/zixun_cleaning_pipeline.md`, or download the Drive output/processed packages and place the extracted files back under `outputs/` and `data/processed/`.
+
+Run the legacy Streamlit demo:
 
 ```bash
 streamlit run app/streamlit_app.py
