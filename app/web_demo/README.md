@@ -40,6 +40,7 @@ An operational retail-marketing workspace with calm grocery colors, dense rankin
 - `outputs/demo_time_name_recommendations.csv`
 - `outputs/coupon_response_tail_fusion_model_comparison.csv`
 - `outputs/coupon_response_final_model_comparison.csv`
+- `outputs/coupon_response_heuristic_model_comparison_zixun.csv`
 - `data/processed/transactions_clean.csv`
 - `data/processed/product_features.csv`
 
@@ -77,3 +78,4 @@ http://127.0.0.1:8765
 - v0.3 verification: `/api/bootstrap` returned 718 events and 6 presentation presets.
 - v0.3 verification: browser clicks passed for `955_19_20171115`, `1216_20_20171127`, and `1142_22_20171206`; fresh browser error and warning logs were empty.
 - v0.4: connected real household purchase history from `transactions_clean.csv` and `product_features.csv` for every selected event.
+- v0.5: regenerated demo artifacts after merging Zixun's cleaning pipeline; final tail fusion now reports Recall@10 0.4138, NDCG@10 0.3225, and Positive Hit@10 53.21%.

@@ -85,8 +85,9 @@ Final result to report:
 
 | Model | Recall@10 | NDCG@10 | Positive Event Hit@10 | Recall@20 | NDCG@20 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Primary XGBoost LTR | 0.4154 | 0.3291 | 0.5321 | 0.5058 | 0.3557 |
-| Final Tail Fusion | 0.4187 | 0.3304 | 0.5413 | 0.5207 | 0.3594 |
+| Primary XGBoost LTR | 0.4006 | 0.3165 | 0.5138 | 0.5188 | 0.3518 |
+| Category-Embedding XGBoost LTR | 0.4099 | 0.3212 | 0.5321 | 0.5238 | 0.3535 |
+| Final Tail Fusion | 0.4138 | 0.3225 | 0.5321 | 0.5184 | 0.3520 |
 
 ## 4. Next-Flow Usability
 
@@ -117,7 +118,7 @@ Copy-Item outputs/candidates_coupon_response_xgboost_ranker.csv outputs/candidat
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --use-category-embedding-features
 Copy-Item outputs/candidates_coupon_response_xgboost_ranker.csv outputs/candidates_coupon_response_xgboost_ranker_pf_interval_category_embedding.csv -Force
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20
-python scripts/run_coupon_response_tail_fusion.py --primary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv --secondary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_category_embedding.csv --primary-metric recall_at_20 --selection-profile top10_ndcg --preserve-min-rank 7 --preserve-max-rank 12
+python scripts/run_coupon_response_tail_fusion.py --primary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_category_embedding.csv --secondary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv --primary-metric recall_at_20 --selection-profile tail_recall --preserve-min-rank 7 --preserve-max-rank 12
 ```
 
 Operational note:

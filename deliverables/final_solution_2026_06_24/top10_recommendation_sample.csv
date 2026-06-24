@@ -1,31 +1,11 @@
-event_id,split,household_id,campaign_id,rank,product_id,product_name,department,product_category,brand,coupon_eligible,recommend_coupon,model_name,fusion_source,final_score
-1011_21_20171206,test,1011,21,1,1092289,National / FRZN NOVELTIES/WTR ICE / ADULT PREMIUM,GROCERY,FRZN NOVELTIES/WTR ICE,National,True,True,coupon_response_tail_fusion,primary_head,1.0
-1011_21_20171206,test,1011,21,2,896093,National / CHEESE / SHREDDED CHEESE,GROCERY,CHEESE,National,True,True,coupon_response_tail_fusion,primary_head,0.943449
-1011_21_20171206,test,1011,21,3,1054186,National / MISC. DAIRY / REFRIGERATED PASTA,GROCERY,MISC. DAIRY,National,True,True,coupon_response_tail_fusion,primary_head,0.943449
-1011_21_20171206,test,1011,21,4,13094777,National / MEAT - MISC / REFRIGERATED PASTA SAUCE,MEAT-PCKGD,MEAT - MISC,National,True,True,coupon_response_tail_fusion,primary_head,0.943449
-1011_21_20171206,test,1011,21,5,833849,National / CHEESE / SHREDDED CHEESE,GROCERY,CHEESE,National,True,True,coupon_response_tail_fusion,primary_head,0.08511158
-1011_21_20171206,test,1011,21,6,835841,National / ICE CREAM/MILK/SHERBTS / SUPER PREMIUM PINTS,GROCERY,ICE CREAM/MILK/SHERBTS,National,True,True,coupon_response_tail_fusion,primary_head,0.08511158
-1011_21_20171206,test,1011,21,7,836916,National / CHEESE / SHREDDED CHEESE,GROCERY,CHEESE,National,True,True,coupon_response_tail_fusion,primary_head,0.08511158
-1011_21_20171206,test,1011,21,8,927360,National / CHEESE / SHREDDED CHEESE,GROCERY,CHEESE,National,True,True,coupon_response_tail_fusion,secondary_tail,0.37450346
-1011_21_20171206,test,1011,21,9,12385588,National / CHEESE / SHREDDED CHEESE,GROCERY,CHEESE,National,True,True,coupon_response_tail_fusion,secondary_tail,0.37450346
-1011_21_20171206,test,1011,21,10,1006906,National / MISC. DAIRY / REFRIGERATED PASTA SAUCE,GROCERY,MISC. DAIRY,National,True,True,coupon_response_tail_fusion,secondary_tail,0.3721793
-1014_20_20171127,test,1014,20,1,819063,National / PASTA SAUCE / MAINSTREAM,GROCERY,PASTA SAUCE,National,True,True,coupon_response_tail_fusion,primary_head,1.0
-1014_20_20171127,test,1014,20,2,913666,National / HAIR CARE PRODUCTS / SHAMPOO,DRUG GM,HAIR CARE PRODUCTS,National,True,True,coupon_response_tail_fusion,primary_head,0.9951036
-1014_20_20171127,test,1014,20,3,926282,National / HAIR CARE PRODUCTS / SHAMPOO,DRUG GM,HAIR CARE PRODUCTS,National,True,True,coupon_response_tail_fusion,primary_head,0.9951036
-1014_20_20171127,test,1014,20,4,819304,National / PASTA SAUCE / MAINSTREAM,GROCERY,PASTA SAUCE,National,True,True,coupon_response_tail_fusion,primary_head,0.09021323
-1014_20_20171127,test,1014,20,5,832760,National / DRY BN/VEG/POTATO/RICE / NOODLE SIDE DISH MIXES,GROCERY,DRY BN/VEG/POTATO/RICE,National,True,True,coupon_response_tail_fusion,primary_head,0.09021323
-1014_20_20171127,test,1014,20,6,835347,National / DRY BN/VEG/POTATO/RICE / NOODLE SIDE DISH MIXES,GROCERY,DRY BN/VEG/POTATO/RICE,National,True,True,coupon_response_tail_fusion,primary_head,0.09021323
-1014_20_20171127,test,1014,20,7,837139,National / DRY BN/VEG/POTATO/RICE / NOODLE SIDE DISH MIXES,GROCERY,DRY BN/VEG/POTATO/RICE,National,True,True,coupon_response_tail_fusion,primary_head,0.09021323
-1014_20_20171127,test,1014,20,8,869577,National / PASTA SAUCE / MAINSTREAM,GROCERY,PASTA SAUCE,National,True,True,coupon_response_tail_fusion,secondary_tail,0.4165493
-1014_20_20171127,test,1014,20,9,1139184,National / CONDIMENTS/SAUCES / PIZZA SAUCE,GROCERY,CONDIMENTS/SAUCES,National,True,True,coupon_response_tail_fusion,secondary_tail,0.4165493
-1014_20_20171127,test,1014,20,10,1095068,National / PASTA SAUCE / MAINSTREAM,GROCERY,PASTA SAUCE,National,True,True,coupon_response_tail_fusion,secondary_tail,0.4139642
-1014_22_20171206,test,1014,22,1,928754,Private / CHEESE / CREAM CHEESE,GROCERY,CHEESE,Private,True,True,coupon_response_tail_fusion,primary_head,1.0
-1014_22_20171206,test,1014,22,2,911974,National / CANNED JUICES / BLENDED JUICE&COMBINATIONS (OV,GROCERY,CANNED JUICES,National,True,True,coupon_response_tail_fusion,primary_head,0.944853
-1014_22_20171206,test,1014,22,3,7168417,National / REFRGRATD DOUGH PRODUCTS / REFRIGERATED SPECILATY ROLLS,GROCERY,REFRGRATD DOUGH PRODUCTS,National,True,True,coupon_response_tail_fusion,primary_head,0.6349955
-1014_22_20171206,test,1014,22,4,1037089,National / FRZN BREAKFAST FOODS / WAFFLES/PANCAKES/FRENCH TOAST,GROCERY,FRZN BREAKFAST FOODS,National,True,True,coupon_response_tail_fusion,primary_head,0.5650009
-1014_22_20171206,test,1014,22,5,1127025,National / FRZN POTATOES / FRZN FRENCH FRIES,GROCERY,FRZN POTATOES,National,True,True,coupon_response_tail_fusion,primary_head,0.52434164
-1014_22_20171206,test,1014,22,6,831509,National / CHEESE / NATURAL CHEESE EXACT WT CHUNKS,GROCERY,CHEESE,National,True,True,coupon_response_tail_fusion,primary_head,0.5165922
-1014_22_20171206,test,1014,22,7,880377,National / CHEESE / SHREDDED CHEESE,GROCERY,CHEESE,National,True,True,coupon_response_tail_fusion,primary_head,0.5165922
-1014_22_20171206,test,1014,22,8,9297615,National / REFRGRATD JUICES/DRNKS / DAIRY CASE 100% PURE JUICE - O,GROCERY,REFRGRATD JUICES/DRNKS,National,True,True,coupon_response_tail_fusion,secondary_tail,0.49683052
-1014_22_20171206,test,1014,22,9,928801,National / GREETING CARDS/WRAP/PARTY SPLY / CARDS SEASONAL,DRUG GM,GREETING CARDS/WRAP/PARTY SPLY,National,True,True,coupon_response_tail_fusion,secondary_tail,0.49484298
-1014_22_20171206,test,1014,22,10,1068576,National / BAG SNACKS / PRETZELS,GROCERY,BAG SNACKS,National,True,True,coupon_response_tail_fusion,secondary_tail,0.49484298
+event_id,split,household_id,campaign_id,coupon_start_date,predicted_purchase_time,rank,product_id,product_name,department,product_category,brand,final_score,success_within_5d_observed,observed_purchase_time,coupon_eligible,fusion_source
+955_19_20171115,test,955,19,2017-11-15,2017-11-20T00:00:00,1,900391,National / BABY FOODS / BABY FOOD - BEGINNER,DRUG GM,BABY FOODS,National,1.0,True,2017-11-15T02:18:38,True,primary_head
+955_19_20171115,test,955,19,2017-11-15,2017-11-20T00:00:00,2,15596467,National / BABY FOODS / BABY FOOD - BEGINNER,DRUG GM,BABY FOODS,National,0.99446845,False,,True,primary_head
+955_19_20171115,test,955,19,2017-11-15,2017-11-20T00:00:00,3,15596769,National / BABY FOODS / BABY FOOD - BEGINNER,DRUG GM,BABY FOODS,National,0.99446845,True,2017-11-15T02:18:38,True,primary_head
+955_19_20171115,test,955,19,2017-11-15,2017-11-20T00:00:00,4,15596959,National / BABY FOODS / BABY FOOD - BEGINNER,DRUG GM,BABY FOODS,National,0.99446845,True,2017-11-15T02:18:38,True,primary_head
+955_19_20171115,test,955,19,2017-11-15,2017-11-20T00:00:00,5,1113462,National / BABY FOODS / BABY FOOD - BEGINNER,DRUG GM,BABY FOODS,National,0.83257467,False,,True,primary_head
+955_19_20171115,test,955,19,2017-11-15,2017-11-20T00:00:00,6,1000672,National / BABY FOODS / BABY FOOD - BEGINNER,DRUG GM,BABY FOODS,National,0.75787324,True,2017-11-15T02:18:38,True,primary_head
+955_19_20171115,test,955,19,2017-11-15,2017-11-20T00:00:00,7,914872,National / BABY FOODS / BABY FOOD - BEGINNER,DRUG GM,BABY FOODS,National,0.75388974,False,,True,primary_head
+955_19_20171115,test,955,19,2017-11-15,2017-11-20T00:00:00,8,15596771,National / BABY FOODS / BABY FOOD - BEGINNER,DRUG GM,BABY FOODS,National,0.75388974,False,,True,primary_head
+955_19_20171115,test,955,19,2017-11-15,2017-11-20T00:00:00,9,986121,National / BABY FOODS / BABY FOOD - BEGINNER,DRUG GM,BABY FOODS,National,0.7914812,False,,True,secondary_tail
+955_19_20171115,test,955,19,2017-11-15,2017-11-20T00:00:00,10,1112212,National / BABY FOODS / BABY FOOD - BEGINNER,DRUG GM,BABY FOODS,National,0.7914812,False,,True,secondary_tail

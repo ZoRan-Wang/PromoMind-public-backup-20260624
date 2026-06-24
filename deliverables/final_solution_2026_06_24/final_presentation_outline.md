@@ -53,7 +53,7 @@ Final model:
 - XGBoost learning-to-rank
 - pull-forward interval relevance label
 - category-embedding secondary ranker
-- validation-selected top-10-profile tail fusion
+- validation-selected tail fusion
 
 ## Slide 5: Model And Feature Signals
 
@@ -79,12 +79,13 @@ Use this table:
 
 | Model | Recall@10 | NDCG@10 | Positive Event Hit@10 | Recall@20 | NDCG@20 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Primary XGBoost LTR | 0.4154 | 0.3291 | 0.5321 | 0.5058 | 0.3557 |
-| Final Tail Fusion | 0.4187 | 0.3304 | 0.5413 | 0.5207 | 0.3594 |
+| Primary XGBoost LTR | 0.4006 | 0.3165 | 0.5138 | 0.5188 | 0.3518 |
+| Category-Embedding XGBoost LTR | 0.4099 | 0.3212 | 0.5321 | 0.5238 | 0.3535 |
+| Final Tail Fusion | 0.4138 | 0.3225 | 0.5321 | 0.5184 | 0.3520 |
 
 Main line:
 
-Positive Event Hit@10 improves from 19.27% to 54.13% against the SOTA-candidate-only coupon baseline.
+Positive Event Hit@10 improves from 18.35% to 53.21% against the candidate-only coupon baseline.
 
 ## Slide 7: Extension Evidence
 

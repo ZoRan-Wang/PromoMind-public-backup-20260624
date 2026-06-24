@@ -6,7 +6,7 @@ This file maps the course final-solution requirements to the current PromoMind r
 
 | Course requirement | Current evidence | Status |
 | --- | --- | --- |
-| Finalized dataset | `data/raw/completejourney/`, `scripts/download_completejourney.R`, `scripts/prepare_dataset.py`, `docs/data_dictionary.md` | Complete |
+| Finalized dataset | `data/raw/completejourney/`, `scripts/clean_completejourney.py`, `data/processed/cleaning_audit.json`, `docs/data_dictionary.md` | Complete |
 | Finalized recommendation problem | `docs/coupon_response_improvement.md`, `deliverables/final_solution_2026_06_24/final_results_summary.md` | Complete |
 | Algorithms | `scripts/run_candidate_models.py`, `scripts/run_cornac_nbr_models.py`, `scripts/run_coupon_response_ranker.py`, `scripts/run_coupon_response_xgboost_ranker.py`, `scripts/run_coupon_response_neural_ranker.py`, `scripts/run_coupon_response_tail_fusion.py` | Complete |
 | Experimental results | `docs/coupon_response_improvement.md`, `deliverables/final_solution_2026_06_24/final_metrics.csv` | Complete |
@@ -32,9 +32,9 @@ Use these claims:
 
 - We use a real grocery retail dataset with transaction, product, campaign, coupon, promotion, redemption, and demographic tables.
 - We reformulate the second stage as household-campaign coupon-response ranking.
-- The final model combines time-aware XGBoost learning-to-rank with validation-selected top-10-profile tail fusion.
-- Held-out test Positive Event Hit@10 improves from 19.27% for the SOTA-candidate-only coupon baseline to 54.13%.
-- The final tail-fusion model reaches Recall@10 0.4187 and NDCG@10 0.3304.
+- The final model combines time-aware XGBoost learning-to-rank with validation-selected tail fusion.
+- Held-out test Positive Event Hit@10 improves from 18.35% for the candidate-only coupon baseline to 53.21%.
+- The final tail-fusion model reaches Recall@10 0.4138 and NDCG@10 0.3225.
 - NLP/product-text features were attempted and documented, but timing and repeat behavior are stronger for this dataset.
 
 Avoid these claims:
@@ -55,6 +55,6 @@ python -m compileall scripts src tests
 Current verified result:
 
 ```text
-35 passed
+43 passed
 compileall passes
 ```

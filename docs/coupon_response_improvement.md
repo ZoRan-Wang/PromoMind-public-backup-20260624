@@ -92,7 +92,7 @@ Test comparison after the first heuristic upgrade:
 
 | Model | Recall@10 | NDCG@10 | Positive Event Hit@10 | All Event Hit@10 |
 | --- | ---: | ---: | ---: | ---: |
-| Coupon base intersection | 0.1570 | 0.1489 | 0.1927 | 0.0294 |
+| Coupon base intersection | 0.1479 | 0.1399 | 0.1835 | 0.0280 |
 | Coupon global popularity | 0.1884 | 0.1045 | 0.2569 | 0.0392 |
 | Coupon repeat-cadence | 0.4005 | 0.2979 | 0.5046 | 0.0769 |
 | Coupon-response ranker | 0.3945 | 0.3145 | 0.5046 | 0.0769 |
@@ -104,17 +104,18 @@ Additional supervised model exploration:
 | PyTorch pairwise neural ranker | CUDA | 0.3983 | 0.3132 | 0.4954 | 0.0755 |
 | XGBoost ranker, binary labels | CUDA | 0.4105 | 0.3255 | 0.5321 | 0.0811 |
 | XGBoost ranker, expected coupon-lead labels | CUDA | 0.4105 | 0.3259 | 0.5321 | 0.0811 |
-| XGBoost ranker, pull-forward interval labels | CUDA | 0.4154 | 0.3291 | 0.5321 | 0.0811 |
-| Tail-fused XGBoost, top-10 profile | CUDA | 0.4187 | 0.3304 | 0.5413 | 0.0825 |
+| XGBoost ranker, pull-forward interval labels | CUDA | 0.4006 | 0.3165 | 0.5138 | 0.0783 |
+| Category-embedding XGBoost ranker | CUDA | 0.4099 | 0.3212 | 0.5321 | 0.0811 |
+| Tail-fused XGBoost, validation-selected profile | CUDA | 0.4138 | 0.3225 | 0.5321 | 0.0811 |
 
 The main gain is against the previous SOTA-candidate-only coupon baseline:
 
 ```text
-Positive Event Hit@10: 19.27% -> 54.13%
-NDCG@10:               0.1489 -> 0.3304
-Recall@10:             0.1570 -> 0.4187
-Recall@20:             0.5058 -> 0.5207 after top-10-profile tail fusion
-NDCG@20:               0.3557 -> 0.3594 after top-10-profile tail fusion
+Positive Event Hit@10: 18.35% -> 53.21%
+NDCG@10:               0.1399 -> 0.3225
+Recall@10:             0.1479 -> 0.4138
+Recall@20:             0.1616 -> 0.5184 after tail fusion
+NDCG@20:               0.1434 -> 0.3520 after tail fusion
 ```
 
 The final XGBoost configuration uses graded relevance for coupon timing. We tested two business interpretations:
@@ -143,7 +144,7 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --use-category-embedding-features
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --use-event-category-features
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --final-train-scope train
-python scripts/run_coupon_response_tail_fusion.py --primary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv --secondary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_category_embedding.csv --primary-metric recall_at_20 --selection-profile top10_ndcg --preserve-min-rank 7 --preserve-max-rank 12
+python scripts/run_coupon_response_tail_fusion.py --primary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_category_embedding.csv --secondary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv --primary-metric recall_at_20 --selection-profile tail_recall --preserve-min-rank 7 --preserve-max-rank 12
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-score-blend --primary-metric recall_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --search-rank-fusion --primary-metric ndcg_at_20
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --wide-search --use-value-features --primary-metric recall_at_20
@@ -159,12 +160,10 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Default XGBoost LTR | 0.4105 | 0.3255 | 0.5321 | 0.5058 | 0.3541 |
 | Expected coupon-lead relevance labels | 0.4105 | 0.3259 | 0.5321 | 0.5058 | 0.3545 |
-| Pull-forward interval relevance labels | 0.4154 | 0.3291 | 0.5321 | 0.5058 | 0.3557 |
+| Pull-forward interval relevance labels | 0.4006 | 0.3165 | 0.5138 | 0.5188 | 0.3518 |
 | Pull-forward + non-repeat positives high | 0.4032 | 0.3179 | 0.5046 | 0.5183 | 0.3521 |
-| Tail fusion, top-10 profile | 0.4187 | 0.3304 | 0.5413 | 0.5207 | 0.3594 |
-| Tail fusion, tail-recall profile | 0.4154 | 0.3291 | 0.5321 | 0.5260 | 0.3609 |
-| Tail fusion, heuristic secondary | 0.4154 | 0.3291 | 0.5321 | 0.5255 | 0.3604 |
-| Tail fusion, rank-fusion secondary | 0.4154 | 0.3291 | 0.5321 | 0.5236 | 0.3607 |
+| Category co-occurrence embedding | 0.4099 | 0.3212 | 0.5321 | 0.5238 | 0.3535 |
+| Final tail fusion, validation profile | 0.4138 | 0.3225 | 0.5321 | 0.5184 | 0.3520 |
 | Pull-forward window `[0, 3]` | 0.4105 | 0.3261 | 0.5321 | 0.5058 | 0.3546 |
 | Pull-forward window `[1, 3]` | 0.4105 | 0.3256 | 0.5321 | 0.5058 | 0.3540 |
 | Wide search only | 0.4105 | 0.3255 | 0.5321 | 0.5058 | 0.3541 |
@@ -176,7 +175,7 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 | TF-IDF/SVD product-text profile | 0.4006 | 0.3176 | 0.5138 | 0.5188 | 0.3529 |
 | Direct TF-IDF product-text match | 0.4105 | 0.3267 | 0.5321 | 0.5058 | 0.3552 |
 | Direct TF-IDF product-text match, wide search | 0.4105 | 0.3265 | 0.5321 | 0.5058 | 0.3549 |
-| Category co-occurrence embedding | 0.4095 | 0.3222 | 0.5321 | 0.5207 | 0.3534 |
+| Category co-occurrence embedding | 0.4099 | 0.3212 | 0.5321 | 0.5238 | 0.3535 |
 | Event category concentration features | 0.4105 | 0.3267 | 0.5321 | 0.5058 | 0.3552 |
 | Final fit on train only | 0.4146 | 0.3228 | 0.5321 | 0.5058 | 0.3494 |
 | Validation score blend | 0.3945 | 0.3079 | 0.5046 | 0.5155 | 0.3442 |
@@ -246,20 +245,19 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 
 This was tested because validation campaigns have a much higher positive-event rate than test campaigns. Training the final model on train only reduced held-out NDCG@10, so the final model keeps train-plus-validation fitting after validation selection.
 
-The final recommendation artifact uses a top-10-profile tail fusion:
+The final recommendation artifact uses validation-selected tail fusion:
 
 ```bash
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20
 Copy-Item outputs/candidates_coupon_response_xgboost_ranker.csv outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv -Force
 python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20 --use-category-embedding-features
 Copy-Item outputs/candidates_coupon_response_xgboost_ranker.csv outputs/candidates_coupon_response_xgboost_ranker_pf_interval_category_embedding.csv -Force
-python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20
-python scripts/run_coupon_response_tail_fusion.py --primary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv --secondary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_category_embedding.csv --primary-metric recall_at_20 --selection-profile top10_ndcg --preserve-min-rank 7 --preserve-max-rank 12
+python scripts/run_coupon_response_tail_fusion.py --primary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_category_embedding.csv --secondary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv --primary-metric recall_at_20 --selection-profile tail_recall --preserve-min-rank 7 --preserve-max-rank 12
 ```
 
-The primary ranker is the pull-forward interval XGBoost model. The secondary ranker is the category co-occurrence embedding variant, which has weaker top-10 precision but stronger tail recall. For the final demo-oriented profile, validation selects `keep_primary_top=7`: ranks 1-7 come from the primary model, then ranks 8-20 are filled from the secondary model with duplicate products removed. This improves held-out Recall@10, NDCG@10, Positive Event Hit@10, Recall@20, and NDCG@20 relative to the primary XGBoost model.
+Under the Zixun-cleaned data, the category co-occurrence embedding variant is the stronger head ranker. The secondary ranker is the pull-forward interval XGBoost model. Validation selects `keep_primary_top=8`: ranks 1-8 come from the category-embedding model, then ranks 9-20 are filled from the primary pull-forward model with duplicate products removed. This improves held-out Recall@10 and NDCG@10 relative to both single XGBoost variants while preserving the same Positive Event Hit@10 as the category-embedding model.
 
-An alternative `tail_recall` profile selects `keep_primary_top=12` and maximizes held-out Recall@20/NDCG@20 while preserving the primary model's top-10 metrics. It is useful for a broader top-20 campaign list, but the final artifact uses `top10_ndcg` because the classroom demo and coupon recommendation table focus on Top-10 products.
+The selected `tail_recall` profile improves held-out Recall@10 and NDCG@10 while preserving the category-embedding model's Positive Event Hit@10. The final artifact uses this profile because it is validation-selected and gives the best current Top-10 result after the Zixun cleaning integration.
 
 Additional tail secondaries were checked after this improvement. The heuristic coupon-response ranker reaches close top-20 performance, and rank-fusion secondaries look stronger on validation, but neither beats the category-embedding secondary on held-out test. Focused multi-secondary filling such as `category > heuristic`, `heuristic > category`, `category > text`, and `rank-fusion > category` also did not improve beyond the single category-embedding tail source. The final artifact therefore keeps the simpler two-source tail fusion.
 
