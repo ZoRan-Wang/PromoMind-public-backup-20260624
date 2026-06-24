@@ -11,6 +11,7 @@ import argparse
 import csv
 import json
 from collections import defaultdict
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -31,6 +32,8 @@ TRANSACTIONS_PATH = DATA_PROCESSED / "transactions_clean.csv"
 PRODUCT_FEATURES_PATH = DATA_PROCESSED / "product_features.csv"
 HISTORY_LIMIT = 30
 PORTFOLIO_LIMIT = 10
+LATE_CASE_LIMIT = 3
+PRESET_CASE_LIMIT = 3
 
 PRESENTATION_PRESETS = [
     {
@@ -120,6 +123,10 @@ def product_key(value: str) -> str:
     return str(as_int(value))
 
 
+def parse_time(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("T", " "))
+
+
 def metric_row(rows: list[dict[str, str]], model_name: str, split: str) -> dict[str, str]:
     matches = [row for row in rows if row.get("model_name") == model_name and row.get("split") == split]
     return matches[0]
@@ -137,6 +144,7 @@ class DemoData:
         self.demo_events = self._build_demo_events()
         self.rolling_portfolios = self._build_rolling_portfolios()
         self.household_history = self._build_household_history()
+        self.late_evidence_by_portfolio = self._build_late_evidence_by_portfolio()
         self.metric_summary = self._build_metric_summary()
 
     def _build_product_lookup(self) -> dict[str, dict[str, str]]:
@@ -265,6 +273,7 @@ class DemoData:
                 "hit_lift_vs_baseline": rows[-1]["positive_event_hit_rate_at_10"]
                 - rows[0]["positive_event_hit_rate_at_10"],
             },
+            "late_evidence": self.late_evidence_summary(),
         }
 
     @staticmethod
@@ -284,6 +293,7 @@ class DemoData:
         for portfolio_id, rows in self.rolling_portfolios.items():
             first = rows[0]
             top10 = rows[:10]
+            late_evidence = self.late_evidence_by_portfolio[portfolio_id]
             options.append(
                 {
                     "portfolio_id": portfolio_id,
@@ -295,6 +305,9 @@ class DemoData:
                     "positive_in_top10": sum(
                         1 for row in top10 if as_bool(row["success_within_5d_observed"])
                     ),
+                    "late_exact_product": late_evidence["late_exact_product"],
+                    "late_same_category": late_evidence["late_same_category"],
+                    "late_category_only": late_evidence["late_category_only"],
                     "event_group": "household_portfolio",
                 }
             )
@@ -360,6 +373,94 @@ class DemoData:
         demo_options.sort(key=lambda row: as_int(str(row["household_id"])))
         return final_options + demo_options
 
+    def presentation_presets(self) -> list[dict[str, object]]:
+        high_hit_presets = [
+            preset
+            for preset in PRESENTATION_PRESETS
+            if preset["group"] == "High-hit windows" and preset["portfolio_id"] in self.rolling_portfolios
+        ]
+        low_hit_presets = [
+            preset
+            for preset in PRESENTATION_PRESETS
+            if preset["group"] == "Low-hit windows" and preset["portfolio_id"] in self.rolling_portfolios
+        ]
+        presets = list(high_hit_presets)
+        used = {preset["portfolio_id"] for preset in high_hit_presets + low_hit_presets}
+        presets.extend(
+            self.late_evidence_presets(
+                "Late exact product",
+                "late_exact_product",
+                "exact_product_case_count",
+                "LATE SKU",
+                "No 5-day hit. Later bought a recommended product.",
+                "late",
+                used,
+            )
+        )
+        used.update(preset["portfolio_id"] for preset in presets)
+        category_only = self.late_evidence_presets(
+            "Late same category",
+            "late_category_only",
+            "category_only_case_count",
+            "LATE CAT",
+            "No 5-day hit. Later bought another product in a recommended category.",
+            "category",
+            used,
+        )
+        presets.extend(category_only)
+        used.update(preset["portfolio_id"] for preset in category_only)
+        if len(category_only) < PRESET_CASE_LIMIT:
+            presets.extend(
+                self.late_evidence_presets(
+                    "Late same category",
+                    "late_same_category",
+                    "same_category_case_count",
+                    "LATE CAT",
+                    "No 5-day hit. Later bought a product in a recommended category.",
+                    "category",
+                    used,
+                    PRESET_CASE_LIMIT - len(category_only),
+                )
+            )
+        presets.extend(low_hit_presets)
+        return presets
+
+    def late_evidence_presets(
+        self,
+        group: str,
+        flag_key: str,
+        count_key: str,
+        tag: str,
+        story: str,
+        tone: str,
+        used: set[str],
+        limit: int = PRESET_CASE_LIMIT,
+    ) -> list[dict[str, object]]:
+        candidates = []
+        for portfolio_id, evidence in self.late_evidence_by_portfolio.items():
+            if portfolio_id in used or not evidence["is_no_hit_window"] or not evidence[flag_key]:
+                continue
+            rows = self.rolling_portfolios[portfolio_id]
+            first = rows[0]
+            candidates.append(
+                (
+                    -as_int(str(evidence[count_key])),
+                    first["coupon_start_date"],
+                    as_int(first["household_id"]),
+                    {
+                        "portfolio_id": portfolio_id,
+                        "group": group,
+                        "label": f"HH {first['household_id']} - {first['coupon_start_date']}",
+                        "tag": tag,
+                        "story": story,
+                        "tone": tone,
+                        "coupon_slots": 10,
+                    },
+                )
+            )
+        candidates.sort(key=lambda item: item[:3])
+        return [item[3] for item in candidates[:limit]]
+
     def portfolio_payload(self, portfolio_id: str, coupon_slots: int) -> dict[str, object]:
         rows = self.rolling_portfolios[portfolio_id]
         first = rows[0]
@@ -397,6 +498,7 @@ class DemoData:
             "history_summary": history_summary,
             "history": [self.history_payload(row) for row in history],
             "recommendations": [self.row_payload(row, coupon_slots) for row in top20],
+            "late_evidence": self.late_evidence_by_portfolio[portfolio_id],
         }
 
     def recommendation_payload(self, event_id: str, coupon_slots: int) -> dict[str, object]:
@@ -485,6 +587,111 @@ class DemoData:
             "total_before_coupon": len(prior_rows),
             "cutoff": coupon_start_date,
         }
+
+    def _build_late_evidence_by_portfolio(self) -> dict[str, dict[str, object]]:
+        return {
+            portfolio_id: self.late_evidence_for_rows(rows)
+            for portfolio_id, rows in self.rolling_portfolios.items()
+        }
+
+    def late_evidence_summary(self) -> dict[str, object]:
+        no_hit_windows = [
+            evidence
+            for evidence in self.late_evidence_by_portfolio.values()
+            if evidence["is_no_hit_window"]
+        ]
+        denominator = len(no_hit_windows)
+        late_exact = sum(1 for evidence in no_hit_windows if evidence["late_exact_product"])
+        late_category = sum(1 for evidence in no_hit_windows if evidence["late_same_category"])
+        return {
+            "no_hit_windows": denominator,
+            "late_exact_product_windows": late_exact,
+            "late_same_category_windows": late_category,
+            "late_exact_product_rate": late_exact / denominator,
+            "late_same_category_rate": late_category / denominator,
+        }
+
+    def late_evidence_for_rows(self, rows: list[dict[str, str]]) -> dict[str, object]:
+        top10 = rows[:PORTFOLIO_LIMIT]
+        household_id = top10[0]["household_id"]
+        window_end = parse_time(top10[0]["predicted_purchase_time"])
+        response_hits = sum(1 for row in top10 if as_bool(row["success_within_5d_observed"]))
+        recommendations_by_product = {product_key(row["product_id"]): row for row in top10}
+        recommendations_by_category: dict[str, list[dict[str, str]]] = defaultdict(list)
+        for row in top10:
+            recommendations_by_category[row["product_category"]].append(row)
+
+        exact_cases = []
+        same_category_cases = []
+        category_only_cases = []
+        exact_products = set()
+        same_categories = set()
+        category_only_categories = set()
+
+        for purchase in self.household_history.get(household_id, []):
+            purchase_time = parse_time(str(purchase["purchase_time"]))
+            if purchase_time <= window_end:
+                continue
+
+            purchase_product = str(purchase["product_id"])
+            purchase_category = str(purchase["product_category"])
+
+            if purchase_product in recommendations_by_product:
+                recommended = recommendations_by_product[purchase_product]
+                if purchase_product not in exact_products:
+                    exact_products.add(purchase_product)
+                    exact_cases.append(self.late_case_payload("Exact product", recommended, purchase, window_end))
+
+            if purchase_category in recommendations_by_category:
+                recommended = recommendations_by_category[purchase_category][0]
+                if purchase_category not in same_categories:
+                    same_categories.add(purchase_category)
+                    same_category_cases.append(
+                        self.late_case_payload("Same category", recommended, purchase, window_end)
+                    )
+                if purchase_product not in recommendations_by_product and purchase_category not in category_only_categories:
+                    category_only_categories.add(purchase_category)
+                    category_only_cases.append(
+                        self.late_case_payload("Same category", recommended, purchase, window_end)
+                    )
+
+        display_category_cases = category_only_cases or same_category_cases
+        return {
+            "is_no_hit_window": response_hits == 0,
+            "response_window_end": top10[0]["predicted_purchase_time"].replace("T", " "),
+            "late_exact_product": len(exact_products) > 0,
+            "late_same_category": len(same_categories) > 0,
+            "late_category_only": len(category_only_categories) > 0,
+            "exact_product_case_count": len(exact_products),
+            "same_category_case_count": len(same_categories),
+            "category_only_case_count": len(category_only_categories),
+            "exact_product_cases": exact_cases[:LATE_CASE_LIMIT],
+            "same_category_cases": display_category_cases[:LATE_CASE_LIMIT],
+        }
+
+    @staticmethod
+    def late_case_payload(
+        kind: str,
+        recommended: dict[str, str],
+        purchase: dict[str, object],
+        window_end: datetime,
+    ) -> dict[str, object]:
+        purchase_time = parse_time(str(purchase["purchase_time"]))
+        return {
+            "kind": kind,
+            "days_after_window": round((purchase_time - window_end).total_seconds() / 86400, 1),
+            "purchase_time": str(purchase["purchase_time"]),
+            "recommended_rank": as_int(recommended.get("portfolio_rank", recommended["rank"])),
+            "recommended_product_id": as_int(recommended["product_id"]),
+            "recommended_product_name": recommended["product_name"],
+            "recommended_category": recommended["product_category"],
+            "purchased_product_id": purchase["product_id"],
+            "purchased_product_name": purchase["product_name"],
+            "purchased_category": purchase["product_category"],
+            "same_product": product_key(recommended["product_id"]) == str(purchase["product_id"]),
+            "sales_value": purchase["sales_value"],
+        }
+
 
     @staticmethod
     def history_payload(row: dict[str, object]) -> dict[str, object]:
@@ -594,7 +801,7 @@ class Handler(BaseHTTPRequestHandler):
                     "metrics": DATA.metric_summary,
                     "portfolios": DATA.portfolio_options(),
                     "events": DATA.event_options(),
-                    "presets": PRESENTATION_PRESETS,
+                    "presets": DATA.presentation_presets(),
                 }
             )
         elif parsed.path == "/api/recommendations":

@@ -18,6 +18,8 @@ const el = {
   metricRecall: document.querySelector("#metricRecall"),
   metricNdcg: document.querySelector("#metricNdcg"),
   metricHit: document.querySelector("#metricHit"),
+  metricLateExact: document.querySelector("#metricLateExact"),
+  metricLateCategory: document.querySelector("#metricLateCategory"),
   eventTitle: document.querySelector("#eventTitle"),
   campaignType: document.querySelector("#campaignType"),
   modelName: document.querySelector("#modelName"),
@@ -29,6 +31,8 @@ const el = {
   storyText: document.querySelector("#storyText"),
   avgScore: document.querySelector("#avgScore"),
   historyMeta: document.querySelector("#historyMeta"),
+  lateEvidenceMeta: document.querySelector("#lateEvidenceMeta"),
+  lateEvidenceCards: document.querySelector("#lateEvidenceCards"),
   recommendationRows: document.querySelector("#recommendationRows"),
   historyRows: document.querySelector("#historyRows"),
   metricBars: document.querySelector("#metricBars"),
@@ -112,7 +116,9 @@ function bestWindowIndex(windows) {
 function comparePortfolio(a, b) {
   return (
     Number(a.positive_in_top10 >= 2) - Number(b.positive_in_top10 >= 2) ||
-    Number(a.positive_in_top10) - Number(b.positive_in_top10)
+    Number(a.positive_in_top10) - Number(b.positive_in_top10) ||
+    Number(a.late_exact_product) - Number(b.late_exact_product) ||
+    Number(a.late_same_category) - Number(b.late_same_category)
   );
 }
 
@@ -121,7 +127,7 @@ function renderHouseholdOptions() {
   state.households.forEach((household) => {
     const option = document.createElement("option");
     const best = household.best;
-    const prefix = best.positive_in_top10 > 0 ? `HIT ${best.positive_in_top10}` : "NO HIT";
+    const prefix = portfolioSignal(best);
     option.value = household.household_id;
     option.textContent = `HH ${household.household_id} - ${household.windows.length} windows - ${prefix}`;
     el.householdSelect.append(option);
@@ -165,7 +171,20 @@ function renderTimeTicks(windows) {
 
 function updateTimeReadout(portfolio, index, total) {
   text(el.timeWindowValue, portfolio.coupon_start_date);
-  text(el.timeWindowMeta, `${index + 1} of ${total} windows - ${portfolio.positive_in_top10} observed hits`);
+  text(el.timeWindowMeta, `${index + 1} of ${total} windows - ${portfolioSignal(portfolio)}`);
+}
+
+function portfolioSignal(portfolio) {
+  if (portfolio.positive_in_top10 > 0) {
+    return `HIT ${portfolio.positive_in_top10}`;
+  }
+  if (portfolio.late_exact_product) {
+    return "LATE SKU";
+  }
+  if (portfolio.late_same_category) {
+    return "LATE CAT";
+  }
+  return "NO HIT";
 }
 
 function firstPresetHouseholdId() {
@@ -203,9 +222,12 @@ function renderPresets() {
 
 function renderHeadlineMetrics() {
   const headline = state.metrics.headline;
+  const late = state.metrics.late_evidence;
   text(el.metricRecall, score(headline.recall_at_10));
   text(el.metricNdcg, score(headline.ndcg_at_10));
   text(el.metricHit, pct(headline.positive_hit_at_10));
+  text(el.metricLateExact, pct(late.late_exact_product_rate));
+  text(el.metricLateCategory, pct(late.late_same_category_rate));
 }
 
 function renderMetricBars() {
@@ -250,6 +272,7 @@ function renderPortfolio(data) {
   renderPresets();
   renderRecommendations(data.recommendations);
   renderHistory(data.history, data.history_summary);
+  renderLateEvidence(data.late_evidence);
 }
 
 function presetFor(eventId) {
@@ -342,6 +365,75 @@ function renderHistory(rows, summary) {
     );
     el.historyRows.append(item);
   });
+}
+
+function renderLateEvidence(evidence) {
+  el.lateEvidenceCards.replaceChildren();
+  const global = state.metrics.late_evidence;
+  text(
+    el.lateEvidenceMeta,
+    `${global.late_exact_product_windows}/${global.no_hit_windows} late SKU - ${global.late_same_category_windows}/${global.no_hit_windows} late category`,
+  );
+
+  const status = evidence.is_no_hit_window
+    ? `No 5-day exact hit. Window ended ${evidence.response_window_end}.`
+    : `This window already has a 5-day exact hit. Window ended ${evidence.response_window_end}.`;
+  const statusCard = child("article", "late-evidence-card late-evidence-status");
+  statusCard.append(child("span", "late-evidence-kicker", "Window status"));
+  statusCard.append(child("strong", "", status));
+  el.lateEvidenceCards.append(statusCard);
+
+  el.lateEvidenceCards.append(
+    lateCaseCard(
+      "Later exact product",
+      `${evidence.exact_product_case_count} Top-10 products`,
+      evidence.exact_product_cases,
+      "No later purchase of the exact recommended Top-10 products.",
+    ),
+  );
+  el.lateEvidenceCards.append(
+    lateCaseCard(
+      "Later same category",
+      `${evidence.same_category_case_count} recommended categories`,
+      evidence.same_category_cases,
+      "No later purchase in the recommended Top-10 categories.",
+    ),
+  );
+}
+
+function lateCaseCard(title, countLabel, rows, emptyText) {
+  const card = child("article", "late-evidence-card");
+  const header = child("div", "late-evidence-card-head");
+  header.append(child("span", "late-evidence-kicker", title));
+  header.append(child("strong", "", countLabel));
+  card.append(header);
+
+  if (rows.length === 0) {
+    card.append(child("p", "late-evidence-empty", emptyText));
+    return card;
+  }
+
+  const list = child("ol", "late-evidence-list");
+  rows.forEach((row, index) => {
+    const item = child("li");
+    item.style.setProperty("--i", index);
+    const tag = child("span", row.same_product ? "case-tag case-exact" : "case-tag case-category", row.kind);
+    const titleLine = child("strong", "", row.purchased_product_name);
+    const purchase = child(
+      "span",
+      "",
+      `${row.purchase_time.replace("T", " ")} - ${Number(row.days_after_window).toFixed(1)} days after window - ${row.purchased_category} - $${Number(row.sales_value).toFixed(2)}`,
+    );
+    const matched = child(
+      "small",
+      "",
+      `Matched Top-10 rank ${row.recommended_rank}: ${row.recommended_product_name} / ${row.recommended_category}`,
+    );
+    item.append(tag, titleLine, purchase, matched);
+    list.append(item);
+  });
+  card.append(list);
+  return card;
 }
 
 el.householdSelect.addEventListener("change", () => {

@@ -3,7 +3,7 @@
 ## Version
 
 - Date: 2026-06-24
-- Version: v0.10
+- Version: v0.11
 - Scope: local HTML frontend plus Python backend for the final presentation demo
 
 ## Visual Thesis
@@ -16,6 +16,7 @@ An operational retail-marketing workspace with calm grocery colors, dense rankin
 - Evidence surface: show final Recall@10, NDCG@10, and Positive Hit@10.
 - Recommendation surface: show Top-10 time-bounded household coupon offers with coupon flags, observed hit evidence, campaign source, and reason text.
 - Context surface: show recent household purchase history before the selected coupon window.
+- Late-evidence surface: show no-hit aggregate late SKU/category rates and concrete follow-up purchase cases for the selected household-window.
 - Model comparison surface: show held-out test Positive Hit@10 across baseline, XGBoost LTR, and final tail fusion.
 
 ## Interaction Thesis
@@ -24,6 +25,7 @@ An operational retail-marketing workspace with calm grocery colors, dense rankin
 - Moving the coupon-window slider updates the active offer pool for the same household.
 - Recommendation rows reveal product, category, score, observed outcome, and concise explanation in one scan.
 - Window shortcuts switch directly between high-hit and low-hit coupon windows.
+- Window shortcuts switch directly between high-hit, late exact product, late same-category, and low-hit coupon windows.
 - Motion highlights page entry, ranked rows, and observed hit labels.
 - Household history shows the real purchase sequence before the coupon window.
 
@@ -115,7 +117,7 @@ The second tail-fusion command restores `outputs/reranked_recommendations.csv` a
 - `GET /api/bootstrap`
   - returns final metrics and selectable rolling household portfolios
 - `GET /api/recommendations?portfolio_id=<household_id_yyyymmdd>&coupon_slots=<n>`
-  - returns selected household-window context, KPIs, history rows, and Top-10 coupon offers
+  - returns selected household-window context, KPIs, history rows, Top-10 coupon offers, and late purchase evidence
 
 ## Test Log
 
@@ -136,3 +138,7 @@ The second tail-fusion command restores `outputs/reranked_recommendations.csv` a
 - v0.8: default presentation presets prioritize high-confidence household-window examples with observed hits.
 - v0.9: coupon offers are fixed to Top-10 products from the full active coupon-eligible pool for the selected household and coupon window. Controls are household selection and coupon-window slider only.
 - v0.10: sidebar shortcuts are grouped as high-hit windows and low-hit windows for direct presentation navigation.
+- v0.11: added no-hit late evidence metrics, concrete later exact-product and same-category purchase cases, and late-evidence shortcut groups.
+- v0.11 verification: `python -m compileall app\web_demo\server.py`, `node --check app\web_demo\static\app.js`, and `python -m pytest -q` passed.
+- v0.11 verification: `/api/bootstrap` returned 12 shortcuts across high-hit, late exact product, late same category, and low-hit groups.
+- v0.11 verification: browser check on `http://127.0.0.1:8766/` showed No-hit late SKU 24.96%, No-hit late category 68.19%, concrete cases for `1703_20171115`, and zero console errors or warnings.
