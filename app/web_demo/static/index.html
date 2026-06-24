@@ -22,14 +22,18 @@
         </div>
 
         <label class="control">
-          <span>Household / coupon window</span>
+          <span>Household</span>
           <select id="householdSelect"></select>
         </label>
 
-        <label class="control">
-          <span>Coupon offers</span>
-          <input id="couponSlots" type="range" min="0" max="10" value="3" />
-          <strong id="couponSlotsValue">3</strong>
+        <label class="control time-control">
+          <span>Coupon window</span>
+          <input id="timeSlider" type="range" min="0" max="0" value="0" step="1" />
+          <div class="time-readout">
+            <strong id="timeWindowValue">-</strong>
+            <small id="timeWindowMeta">-</small>
+          </div>
+          <div id="timeTicks" class="time-ticks"></div>
         </label>
 
         <section class="preset-panel" aria-label="Presentation presets">
@@ -87,7 +91,7 @@
             <strong id="top10Hits">-</strong>
           </div>
           <div>
-            <span>Categories in Top-10</span>
+            <span>Coupon offers</span>
             <strong id="eligibleSlots">-</strong>
           </div>
         </section>
@@ -97,7 +101,7 @@
             <div class="section-heading">
               <div>
                 <p class="eyebrow">Output</p>
-                <h3 id="recommendationTitle">Household coupon offer portfolio</h3>
+                <h3 id="recommendationTitle">Top-10 coupon offers</h3>
               </div>
               <span id="avgScore" class="small-stat">-</span>
             </div>

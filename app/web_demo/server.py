@@ -30,15 +30,14 @@ HEURISTIC_METRICS_PATH = OUTPUTS / "coupon_response_heuristic_model_comparison_z
 TRANSACTIONS_PATH = DATA_PROCESSED / "transactions_clean.csv"
 PRODUCT_FEATURES_PATH = DATA_PROCESSED / "product_features.csv"
 HISTORY_LIMIT = 30
-PORTFOLIO_LIMIT = 20
-PORTFOLIO_CATEGORY_CAP = 2
+PORTFOLIO_LIMIT = 10
 
 PRESENTATION_PRESETS = [
     {
-        "portfolio_id": "22_20171206",
-        "label": "Highest-hit portfolio",
-        "tag": "HIT 3",
-        "story": "Three coupon offers convert while the Top-10 portfolio spans seven categories.",
+        "portfolio_id": "46_20171206",
+        "label": "High-confidence basket",
+        "tag": "HIT 2",
+        "story": "Current-window coupon offers are ranked by household repurchase confidence.",
         "tone": "hit",
         "coupon_slots": 10,
     },
@@ -46,23 +45,23 @@ PRESENTATION_PRESETS = [
         "portfolio_id": "1074_20171206",
         "label": "Cheese repeat basket",
         "tag": "HIT 3",
-        "story": "Repeat cheese and refrigerated dough offers convert inside a broader household grocery portfolio.",
+        "story": "Prior purchases and timing signals lift repeatable grocery offers.",
         "tone": "hit",
         "coupon_slots": 10,
     },
     {
-        "portfolio_id": "46_20171206",
-        "label": "Cards and juice mix",
-        "tag": "HIT 2",
-        "story": "Greeting-card and refrigerated-juice offers convert inside a seven-category basket.",
+        "portfolio_id": "1804_20171206",
+        "label": "Seasonal repeat basket",
+        "tag": "HIT 3",
+        "story": "The active coupon window ranks the strongest household repeat signals.",
         "tone": "hit",
         "coupon_slots": 10,
     },
     {
         "portfolio_id": "67_20171206",
-        "label": "Diverse no-hit portfolio",
+        "label": "Reasonable no-hit basket",
         "tag": "NO HIT",
-        "story": "The portfolio covers nine categories and gives a clear non-conversion example.",
+        "story": "High-confidence offers can still miss inside a short response window.",
         "tone": "miss",
         "coupon_slots": 10,
     },
@@ -172,12 +171,7 @@ class DemoData:
 
         portfolios = {}
         for (household_id, coupon_start_date), rows in grouped.items():
-            unique_rows = self._dedupe_best_product_rows(rows)
-            picked_rows = self._pick_diverse_rows(
-                unique_rows,
-                PORTFOLIO_LIMIT,
-                PORTFOLIO_CATEGORY_CAP,
-            )
+            picked_rows = self._top_repurchase_rows(rows, PORTFOLIO_LIMIT)
             portfolio_id = self.portfolio_id(household_id, coupon_start_date)
             portfolios[portfolio_id] = [
                 dict(row, portfolio_rank=str(rank))
@@ -197,42 +191,22 @@ class DemoData:
     def portfolio_id(household_id: str, coupon_start_date: str) -> str:
         return f"{household_id}_{coupon_start_date.replace('-', '')}"
 
-    @staticmethod
-    def _dedupe_best_product_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
-        ranked_rows = sorted(rows, key=lambda row: (-as_float(row["final_score"]), as_int(row["rank"])))
+    def _top_repurchase_rows(self, rows: list[dict[str, str]], limit: int) -> list[dict[str, str]]:
+        ranked_rows = sorted(rows, key=self._repurchase_sort_key)
         best_by_product = {}
         for row in ranked_rows:
             best_by_product.setdefault(product_key(row["product_id"]), row)
-        return list(best_by_product.values())
+        return list(best_by_product.values())[:limit]
 
     @staticmethod
-    def _pick_diverse_rows(
-        rows: list[dict[str, str]],
-        limit: int,
-        category_cap: int,
-    ) -> list[dict[str, str]]:
-        picked = []
-        picked_products = set()
-        category_counts: dict[str, int] = defaultdict(int)
-
-        for row in rows:
-            category = row["product_category"]
-            if category_counts[category] < category_cap:
-                picked.append(row)
-                picked_products.add(product_key(row["product_id"]))
-                category_counts[category] += 1
-            if len(picked) >= limit:
-                return picked
-
-        for row in rows:
-            key = product_key(row["product_id"])
-            if key not in picked_products:
-                picked.append(row)
-                picked_products.add(key)
-            if len(picked) >= limit:
-                return picked
-
-        return picked
+    def _repurchase_sort_key(row: dict[str, str]) -> tuple[float, float, float, float, int]:
+        return (
+            -as_float(row["final_score"]),
+            -float(as_bool(row["has_prior_product"])),
+            -as_float(row["repeat_signal"]),
+            -as_float(row["cadence_signal"]),
+            as_int(row["rank"]),
+        )
 
     def _build_household_history(self) -> dict[str, list[dict[str, object]]]:
         households = self._relevant_households()
@@ -321,7 +295,6 @@ class DemoData:
         options.sort(
             key=lambda row: (
                 -int(as_int(str(row["positive_in_top10"])) >= 2),
-                -as_int(str(row["category_count"])),
                 -as_int(str(row["positive_in_top10"])),
                 str(row["coupon_start_date"]),
                 as_int(str(row["household_id"])),

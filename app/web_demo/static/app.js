@@ -1,13 +1,19 @@
 const state = {
   portfolios: [],
+  households: [],
+  portfoliosByHousehold: {},
   presets: [],
   metrics: null,
 };
 
+const COUPON_SLOTS = 10;
+
 const el = {
   householdSelect: document.querySelector("#householdSelect"),
-  couponSlots: document.querySelector("#couponSlots"),
-  couponSlotsValue: document.querySelector("#couponSlotsValue"),
+  timeSlider: document.querySelector("#timeSlider"),
+  timeWindowValue: document.querySelector("#timeWindowValue"),
+  timeWindowMeta: document.querySelector("#timeWindowMeta"),
+  timeTicks: document.querySelector("#timeTicks"),
   presetButtons: document.querySelector("#presetButtons"),
   metricRecall: document.querySelector("#metricRecall"),
   metricNdcg: document.querySelector("#metricNdcg"),
@@ -55,22 +61,116 @@ function setBootstrap(data) {
   state.portfolios = data.portfolios;
   state.presets = data.presets;
   state.metrics = data.metrics;
-  renderPortfolioOptions();
+  buildHouseholdGroups();
+  renderHouseholdOptions();
+  renderTimeControl();
   renderPresets();
   renderHeadlineMetrics();
   renderMetricBars();
   loadSelectedPortfolio();
 }
 
-function renderPortfolioOptions() {
-  el.householdSelect.replaceChildren();
+function buildHouseholdGroups() {
+  state.portfoliosByHousehold = {};
   state.portfolios.forEach((portfolio) => {
+    const householdId = String(portfolio.household_id);
+    if (!state.portfoliosByHousehold[householdId]) {
+      state.portfoliosByHousehold[householdId] = [];
+    }
+    state.portfoliosByHousehold[householdId].push(portfolio);
+  });
+
+  state.households = Object.entries(state.portfoliosByHousehold).map(([householdId, windows]) => {
+    windows.sort((a, b) => a.coupon_start_date.localeCompare(b.coupon_start_date));
+    const bestIndex = bestWindowIndex(windows);
+    return {
+      household_id: householdId,
+      windows,
+      best_index: bestIndex,
+      best: windows[bestIndex],
+    };
+  });
+
+  state.households.sort(
+    (a, b) =>
+      Number(b.windows.length > 1) - Number(a.windows.length > 1) ||
+      comparePortfolio(b.best, a.best) ||
+      Number(a.household_id) - Number(b.household_id),
+  );
+}
+
+function bestWindowIndex(windows) {
+  let bestIndex = 0;
+  windows.forEach((portfolio, index) => {
+    if (comparePortfolio(portfolio, windows[bestIndex]) > 0) {
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}
+
+function comparePortfolio(a, b) {
+  return (
+    Number(a.positive_in_top10 >= 2) - Number(b.positive_in_top10 >= 2) ||
+    Number(a.positive_in_top10) - Number(b.positive_in_top10)
+  );
+}
+
+function renderHouseholdOptions() {
+  el.householdSelect.replaceChildren();
+  state.households.forEach((household) => {
     const option = document.createElement("option");
-    const prefix = portfolio.positive_in_top10 > 0 ? `HIT ${portfolio.positive_in_top10}` : "NO HIT";
-    option.value = portfolio.portfolio_id;
-    option.textContent = `${prefix} - HH ${portfolio.household_id} - ${portfolio.coupon_start_date} - ${portfolio.category_count} categories`;
+    const best = household.best;
+    const prefix = best.positive_in_top10 > 0 ? `HIT ${best.positive_in_top10}` : "NO HIT";
+    option.value = household.household_id;
+    option.textContent = `HH ${household.household_id} - ${household.windows.length} windows - ${prefix}`;
     el.householdSelect.append(option);
   });
+  el.householdSelect.value = firstPresetHouseholdId();
+}
+
+function selectedHousehold() {
+  return state.households.find((household) => household.household_id === el.householdSelect.value);
+}
+
+function selectedPortfolio() {
+  const household = selectedHousehold();
+  return household.windows[Number(el.timeSlider.value)];
+}
+
+function renderTimeControl(portfolioId) {
+  const household = selectedHousehold();
+  let index = household.best_index;
+  if (portfolioId) {
+    const matchedIndex = household.windows.findIndex((portfolio) => portfolio.portfolio_id === portfolioId);
+    index = matchedIndex >= 0 ? matchedIndex : index;
+  }
+
+  el.timeSlider.min = 0;
+  el.timeSlider.max = household.windows.length - 1;
+  el.timeSlider.value = index;
+  el.timeSlider.disabled = household.windows.length === 1;
+  renderTimeTicks(household.windows);
+  updateTimeReadout(household.windows[index], index, household.windows.length);
+}
+
+function renderTimeTicks(windows) {
+  el.timeTicks.replaceChildren();
+  windows.forEach((portfolio, index) => {
+    const tick = child("span", "", portfolio.coupon_start_date.slice(5));
+    tick.style.setProperty("--x", windows.length === 1 ? 0 : index / (windows.length - 1));
+    el.timeTicks.append(tick);
+  });
+}
+
+function updateTimeReadout(portfolio, index, total) {
+  text(el.timeWindowValue, portfolio.coupon_start_date);
+  text(el.timeWindowMeta, `${index + 1} of ${total} windows - ${portfolio.positive_in_top10} observed hits`);
+}
+
+function firstPresetHouseholdId() {
+  const portfolio = state.portfolios.find((item) => item.portfolio_id === state.presets[0].portfolio_id);
+  return String(portfolio.household_id);
 }
 
 function renderPresets() {
@@ -79,16 +179,17 @@ function renderPresets() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `preset-button preset-${preset.tone}`;
-    button.dataset.presetId = preset.household_id;
+    button.dataset.presetId = preset.portfolio_id;
     button.append(child("span", "preset-tag", preset.tag));
     button.append(child("strong", "", preset.label));
     button.append(child("small", "", preset.story));
     button.addEventListener("click", () => {
-      el.householdSelect.value = preset.portfolio_id;
-      el.couponSlots.value = preset.coupon_slots;
+      const portfolio = state.portfolios.find((item) => item.portfolio_id === preset.portfolio_id);
+      el.householdSelect.value = String(portfolio.household_id);
+      renderTimeControl(preset.portfolio_id);
       loadSelectedPortfolio();
     });
-    if (preset.portfolio_id === el.householdSelect.value) {
+    if (preset.portfolio_id === selectedPortfolio().portfolio_id) {
       button.classList.add("is-active");
     }
     el.presetButtons.append(button);
@@ -121,10 +222,9 @@ function renderMetricBars() {
 }
 
 function loadSelectedPortfolio() {
-  const portfolioId = el.householdSelect.value;
-  const couponSlots = el.couponSlots.value;
-  text(el.couponSlotsValue, couponSlots);
-  fetch(`/api/recommendations?portfolio_id=${encodeURIComponent(portfolioId)}&coupon_slots=${couponSlots}`)
+  const portfolio = selectedPortfolio();
+  updateTimeReadout(portfolio, Number(el.timeSlider.value), selectedHousehold().windows.length);
+  fetch(`/api/recommendations?portfolio_id=${encodeURIComponent(portfolio.portfolio_id)}&coupon_slots=${COUPON_SLOTS}`)
     .then((response) => response.json())
     .then(renderPortfolio);
 }
@@ -139,7 +239,7 @@ function renderPortfolio(data) {
   text(el.couponStart, event.coupon_start_date);
   text(el.predictedPurchase, event.predicted_purchase_time.replace("T", " "));
   text(el.top10Hits, `${kpis.top10_observed_success} observed`);
-  text(el.eligibleSlots, `${kpis.top10_category_count} categories`);
+  text(el.eligibleSlots, `${kpis.coupon_slots} selected`);
   text(el.avgScore, `Avg Top-10 score ${score(kpis.avg_top10_score)}`);
   renderStory(preset, kpis);
   renderPresets();
@@ -239,8 +339,11 @@ function renderHistory(rows, summary) {
   });
 }
 
-el.householdSelect.addEventListener("change", loadSelectedPortfolio);
-el.couponSlots.addEventListener("input", loadSelectedPortfolio);
+el.householdSelect.addEventListener("change", () => {
+  renderTimeControl();
+  loadSelectedPortfolio();
+});
+el.timeSlider.addEventListener("input", loadSelectedPortfolio);
 
 fetch("/api/bootstrap")
   .then((response) => response.json())

@@ -156,9 +156,48 @@ input[type="range"] {
   accent-color: #5eead4;
 }
 
-#couponSlotsValue {
+.time-control input[type="range"] {
+  margin-top: 4px;
+}
+
+.time-readout {
+  display: grid;
+  gap: 3px;
+}
+
+#timeWindowValue {
   color: #5eead4;
-  font-size: 26px;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+#timeWindowMeta {
+  color: #b7c1cc;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.time-ticks {
+  position: relative;
+  height: 18px;
+  margin-top: -2px;
+}
+
+.time-ticks span {
+  position: absolute;
+  left: calc(var(--x) * 100%);
+  transform: translateX(-50%);
+  color: #8fa0ad;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.time-ticks span:first-child {
+  transform: translateX(0);
+}
+
+.time-ticks span:last-child {
+  transform: translateX(-100%);
 }
 
 .preset-panel {
