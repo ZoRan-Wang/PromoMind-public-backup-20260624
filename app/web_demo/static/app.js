@@ -175,7 +175,12 @@ function firstPresetHouseholdId() {
 
 function renderPresets() {
   el.presetButtons.replaceChildren();
+  let activeGroup = "";
   state.presets.forEach((preset) => {
+    if (preset.group !== activeGroup) {
+      activeGroup = preset.group;
+      el.presetButtons.append(child("div", "preset-group-label", activeGroup));
+    }
     const button = document.createElement("button");
     button.type = "button";
     button.className = `preset-button preset-${preset.tone}`;

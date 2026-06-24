@@ -3,7 +3,7 @@
 ## Version
 
 - Date: 2026-06-24
-- Version: v0.9
+- Version: v0.10
 - Scope: local HTML frontend plus Python backend for the final presentation demo
 
 ## Visual Thesis
@@ -23,7 +23,7 @@ An operational retail-marketing workspace with calm grocery colors, dense rankin
 - Changing the selected household-window updates all context, history, recommendations, and KPIs.
 - Moving the coupon-window slider updates the active offer pool for the same household.
 - Recommendation rows reveal product, category, score, observed outcome, and concise explanation in one scan.
-- Presentation presets switch directly between high-hit households and reasonable no-hit households.
+- Window shortcuts switch directly between high-hit and low-hit coupon windows.
 - Motion highlights page entry, ranked rows, and observed hit labels.
 - Household history shows the real purchase sequence before the coupon window.
 
@@ -115,7 +115,7 @@ The second tail-fusion command restores `outputs/reranked_recommendations.csv` a
 - `GET /api/bootstrap`
   - returns final metrics and selectable rolling household portfolios
 - `GET /api/recommendations?portfolio_id=<household_id_yyyymmdd>&coupon_slots=<n>`
-  - returns selected household-window context, KPIs, history rows, and Top-20 coupon offers
+  - returns selected household-window context, KPIs, history rows, and Top-10 coupon offers
 
 ## Test Log
 
@@ -135,3 +135,4 @@ The second tail-fusion command restores `outputs/reranked_recommendations.csv` a
 - v0.7: main demo output is rolling household coupon portfolios keyed by `household_id + coupon_start_date`. The backend keeps each basket aligned with currently active coupon offers for the selected coupon window.
 - v0.8: default presentation presets prioritize high-confidence household-window examples with observed hits.
 - v0.9: coupon offers are fixed to Top-10 products from the full active coupon-eligible pool for the selected household and coupon window. Controls are household selection and coupon-window slider only.
+- v0.10: sidebar shortcuts are grouped as high-hit windows and low-hit windows for direct presentation navigation.
