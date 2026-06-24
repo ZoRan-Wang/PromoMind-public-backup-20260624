@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PromoMind Demo</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="sidebar" aria-label="Demo controls">
+        <div class="brand-lockup">
+          <span class="brand-mark">PM</span>
+          <div>
+            <p class="eyebrow">PromoMind</p>
+            <h1>Coupon Response Ranking Demo</h1>
+          </div>
+          <p class="caption">
+            Local browser interface for household-campaign coupon product ranking.
+          </p>
+        </div>
+
+        <label class="control">
+          <span>Household / campaign event</span>
+          <select id="eventSelect"></select>
+        </label>
+
+        <label class="control">
+          <span>Coupon slots</span>
+          <input id="couponSlots" type="range" min="0" max="10" value="3" />
+          <strong id="couponSlotsValue">3</strong>
+        </label>
+
+        <section class="preset-panel" aria-label="Presentation presets">
+          <div class="preset-heading">
+            <span>Presentation presets</span>
+            <strong>Showcase</strong>
+          </div>
+          <div id="presetButtons" class="preset-grid"></div>
+        </section>
+
+        <section class="metric-list" aria-label="Final model metrics">
+          <div>
+            <span>Recall@10</span>
+            <strong id="metricRecall">0.4187</strong>
+          </div>
+          <div>
+            <span>NDCG@10</span>
+            <strong id="metricNdcg">0.3304</strong>
+          </div>
+          <div>
+            <span>Positive Hit@10</span>
+            <strong id="metricHit">54.13%</strong>
+          </div>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Selected event</p>
+            <h2 id="eventTitle">Loading event</h2>
+          </div>
+          <div class="status-row">
+            <span id="campaignType">-</span>
+            <span id="modelName">-</span>
+          </div>
+        </header>
+
+        <section class="story-strip" aria-label="Selected event storyline">
+          <span id="storyTag">-</span>
+          <p id="storyText">Loading selected event.</p>
+        </section>
+
+        <section class="kpis" aria-label="Selected event KPIs">
+          <div>
+            <span>Coupon start</span>
+            <strong id="couponStart">-</strong>
+          </div>
+          <div>
+            <span>Predicted purchase</span>
+            <strong id="predictedPurchase">-</strong>
+          </div>
+          <div>
+            <span>Top-10 observed hits</span>
+            <strong id="top10Hits">-</strong>
+          </div>
+          <div>
+            <span>Coupon eligible in slots</span>
+            <strong id="eligibleSlots">-</strong>
+          </div>
+        </section>
+
+        <section class="content-grid">
+          <section class="recommendation-area" aria-labelledby="recommendationTitle">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Output</p>
+                <h3 id="recommendationTitle">Top coupon product recommendations</h3>
+              </div>
+              <span id="avgScore" class="small-stat">-</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Product</th>
+                    <th>Score</th>
+                    <th>Coupon</th>
+                    <th>Observed</th>
+                  </tr>
+                </thead>
+                <tbody id="recommendationRows"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="history-area" aria-labelledby="historyTitle">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Input</p>
+                <h3 id="historyTitle">Recent household purchases</h3>
+              </div>
+            </div>
+            <ol id="historyRows" class="history-list"></ol>
+          </section>
+        </section>
+
+        <section class="chart-area" aria-labelledby="chartTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Model evidence</p>
+              <h3 id="chartTitle">Held-out test comparison</h3>
+            </div>
+          </div>
+          <div id="metricBars" class="bars"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
