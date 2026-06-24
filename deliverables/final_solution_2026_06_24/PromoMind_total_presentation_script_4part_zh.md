@@ -17,7 +17,7 @@
 
 这个项目的核心问题是：在营销预算有限的情况下，对于某一个家庭，哪些 campaign coupon products 更适合被推荐。项目目标从下一次购买预测推进到具体营销活动中的 coupon product response priority 排序。
 
-最终模型在 held-out campaign test split 上取得了 Recall@10 0.4187、NDCG@10 0.3304，以及 Positive Event Hit@10 54.13%。这说明系统能够把更多真实正响应商品排进 Top-10，同时也能提升正响应事件被命中的概率。
+最终模型在 held-out campaign test split 上取得了 Recall@10 0.4138、NDCG@10 0.3225，以及 Positive Event Hit@10 53.21%。这说明系统能够把更多真实正响应商品排进 Top-10，同时也能提升正响应事件被命中的概率。
 
 ### Slide 2：Course Requirements Coverage
 
@@ -103,9 +103,9 @@ Part 2 到这里结束。接下来 Part 3 会介绍第二阶段的 coupon-respon
 
 ### Slide 8：Final Held-out Test Results
 
-最终 held-out test 结果显示，Final tail fusion 达到 Recall@10 0.4187、NDCG@10 0.3304、Positive Event Hit@10 0.5413、Recall@20 0.5207 和 NDCG@20 0.3594。
+最终 held-out test 结果显示，Final tail fusion 达到 Recall@10 0.4138、NDCG@10 0.3225、Positive Event Hit@10 0.5321、Recall@20 0.5184 和 NDCG@20 0.3520。
 
-相较 candidate-only coupon baseline，Recall@10 从 0.1570 提升到 0.4187，NDCG@10 从 0.1489 提升到 0.3304，Positive Event Hit@10 从 19.27% 提升到 54.13%。
+相较 candidate-only coupon baseline，Recall@10 从 0.1479 提升到 0.4138，NDCG@10 从 0.1399 提升到 0.3225，Positive Event Hit@10 从 18.35% 提升到 53.21%。
 
 这些结果说明，单纯使用候选模型做 coupon baseline 还不够。加入时间感知、复购节奏和 campaign-level response features 后，模型能够更准确地把正响应 coupon products 排进 Top-10。
 
@@ -172,4 +172,4 @@ PromoMind 的适用场景包括连锁超市会员优惠券推荐、电商 campai
 
 ## 一分钟压缩版结尾
 
-PromoMind 的最终任务是对每个 household-campaign exposure 中的 coupon products 进行 response priority ranking。项目使用 The Complete Journey 真实零售数据，采用两阶段架构：第一阶段用多种 next-basket candidate models 保证覆盖，第二阶段用时间感知 XGBoost LTR 和 tail fusion 完成 coupon-response 排序。最终模型在 held-out test 上达到 Recall@10 0.4187、NDCG@10 0.3304、Positive Event Hit@10 54.13%，明显超过 candidate-only coupon baseline。项目还提供 Streamlit working demo、最终结果表和完整报告。它的主要价值是帮助营销团队在有限预算下更合理地选择和排序 coupon products。未来可以继续扩展到 causal uplift、真实 margin 优化、多模态商品理解和生产级推荐服务。
+PromoMind 的最终任务是对每个 household-campaign exposure 中的 coupon products 进行 response priority ranking。项目使用 The Complete Journey 真实零售数据，采用两阶段架构：第一阶段用多种 next-basket candidate models 保证覆盖，第二阶段用时间感知 XGBoost LTR 和 tail fusion 完成 coupon-response 排序。最终模型在 held-out test 上达到 Recall@10 0.4138、NDCG@10 0.3225、Positive Event Hit@10 53.21%，明显超过 candidate-only coupon baseline。项目还提供 Streamlit working demo、最终结果表和完整报告。它的主要价值是帮助营销团队在有限预算下更合理地选择和排序 coupon products。未来可以继续扩展到 causal uplift、真实 margin 优化、多模态商品理解和生产级推荐服务。

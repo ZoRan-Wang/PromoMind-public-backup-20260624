@@ -1,3 +1,4 @@
 model_label,model_name,split,recall_at_10,ndcg_at_10,positive_event_hit_rate_at_10,recall_at_20,ndcg_at_20,keep_primary_top,selection_profile
-Primary XGBoost LTR,coupon_response_xgboost_ranker,test,0.415384,0.329095,0.53211,0.505805,0.35574,,
-Final Tail Fusion,coupon_response_tail_fusion,test,0.418709,0.330445,0.541284,0.520697,0.359376,7,top10_ndcg
+Primary XGBoost LTR,coupon_response_xgboost_ranker,test,0.4005517883260204,0.316512097111789,0.5137614678899083,0.5188355936710544,0.3517809684012219,,
+Category-Embedding XGBoost LTR,coupon_response_xgboost_ranker,test,0.4099338518813987,0.3211938895529505,0.5321100917431193,0.5238216327616009,0.3534638045146015,,
+Final Tail Fusion,coupon_response_tail_fusion,test,0.4137564818508177,0.3225433945502442,0.5321100917431193,0.5184367105438107,0.3520257890443586,8.0,tail_recall

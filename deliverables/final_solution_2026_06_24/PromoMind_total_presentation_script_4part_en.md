@@ -17,7 +17,7 @@ Good morning everyone. Our group project is PromoMind, a promotion-aware grocery
 
 The core question is: under a limited marketing budget, which campaign coupon products should be recommended to a specific household. The project moves from next-purchase prediction to coupon product response priority ranking inside a concrete marketing campaign.
 
-On the held-out campaign test split, our final model reaches Recall@10 of 0.4187, NDCG@10 of 0.3304, and Positive Event Hit@10 of 54.13%. These results show that the system can place more truly responsive products into the Top-10 recommendation list and improve the probability that a positive response event is covered.
+On the held-out campaign test split, our final model reaches Recall@10 of 0.4138, NDCG@10 of 0.3225, and Positive Event Hit@10 of 53.21%. These results show that the system can place more truly responsive products into the Top-10 recommendation list and improve the probability that a positive response event is covered.
 
 ### Slide 2: Course Requirements Coverage
 
@@ -103,9 +103,9 @@ The business interpretation of this stage is important. Supervised LTR learns re
 
 ### Slide 8: Final Held-Out Test Results
 
-The final held-out test results show that Final tail fusion reaches Recall@10 of 0.4187, NDCG@10 of 0.3304, Positive Event Hit@10 of 0.5413, Recall@20 of 0.5207, and NDCG@20 of 0.3594.
+The final held-out test results show that Final tail fusion reaches Recall@10 of 0.4138, NDCG@10 of 0.3225, Positive Event Hit@10 of 0.5321, Recall@20 of 0.5184, and NDCG@20 of 0.3520.
 
-Compared with the candidate-only coupon baseline, Recall@10 increases from 0.1570 to 0.4187, NDCG@10 increases from 0.1489 to 0.3304, and Positive Event Hit@10 increases from 19.27% to 54.13%.
+Compared with the candidate-only coupon baseline, Recall@10 increases from 0.1479 to 0.4138, NDCG@10 increases from 0.1399 to 0.3225, and Positive Event Hit@10 increases from 18.35% to 53.21%.
 
 These results show that coupon baseline ranking based only on candidate models is not enough. After adding time-aware features, repurchase rhythm, and campaign-level response features, the model ranks positive-response coupon products into Top-10 more accurately.
 
@@ -172,4 +172,4 @@ Final summary: PromoMind completes an end-to-end recommender system workflow fro
 
 ## One-Minute Closing Version
 
-PromoMind's final task is response priority ranking for coupon products within each household-campaign exposure. The project uses The Complete Journey real retail dataset and follows a two-stage architecture: the first stage uses multiple next-basket candidate models for coverage, and the second stage uses time-aware XGBoost LTR plus tail fusion for coupon-response ranking. The final model reaches Recall@10 of 0.4187, NDCG@10 of 0.3304, and Positive Event Hit@10 of 54.13% on the held-out test split, clearly above the candidate-only coupon baseline. The project also provides a Streamlit working demo, final result files, and a complete report. Its main value is helping marketing teams choose and rank coupon products more reasonably under a limited budget. Future work can extend it to causal uplift, real margin optimization, multimodal product understanding, and production-grade recommendation service.
+PromoMind's final task is response priority ranking for coupon products within each household-campaign exposure. The project uses The Complete Journey real retail dataset and follows a two-stage architecture: the first stage uses multiple next-basket candidate models for coverage, and the second stage uses time-aware XGBoost LTR plus tail fusion for coupon-response ranking. The final model reaches Recall@10 of 0.4138, NDCG@10 of 0.3225, and Positive Event Hit@10 of 53.21% on the held-out test split, clearly above the candidate-only coupon baseline. The project also provides a Streamlit working demo, final result files, and a complete report. Its main value is helping marketing teams choose and rank coupon products more reasonably under a limited budget. Future work can extend it to causal uplift, real margin optimization, multimodal product understanding, and production-grade recommendation service.

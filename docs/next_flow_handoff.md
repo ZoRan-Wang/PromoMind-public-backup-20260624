@@ -1,6 +1,6 @@
 # PromoMind Next-Flow Handoff
 
-Verification target: latest `main` after this handoff commit. The model/result state summarized here was produced from commit `33df97f6f9d4fe1b03ae2679db604f5fe2ebc7ef` and then packaged into the final handoff files.
+Verification target: `codex/zixun-cleaning-retrain` before merge back to `main`. The model/result state summarized here was regenerated on 2026-06-24 after merging Zixun's cleaning pipeline.
 
 This file is the current handoff for the next teammate. Older PM files and task boards are retained as planning history; use this document as the current operational source of truth.
 
@@ -11,7 +11,7 @@ The project now has a complete coupon-response recommendation pipeline:
 - Dataset: The Complete Journey grocery retail data.
 - Core task: for each household-campaign exposure, rank campaign coupon products.
 - Response label: a product is positive if the exposed household buys it within five days after campaign start.
-- Final model: pull-forward interval XGBoost learning-to-rank plus top-10-profile tail fusion.
+- Final model: pull-forward interval XGBoost learning-to-rank plus validation-selected tail fusion.
 - Final local artifact: `outputs/reranked_recommendations.csv`.
 - Committed result snapshot: `deliverables/final_solution_2026_06_24/final_metrics.csv`.
 
@@ -19,8 +19,9 @@ Final held-out test result:
 
 | Model | Recall@10 | NDCG@10 | Positive Event Hit@10 | Recall@20 | NDCG@20 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Primary XGBoost LTR | 0.4154 | 0.3291 | 0.5321 | 0.5058 | 0.3557 |
-| Final Tail Fusion | 0.4187 | 0.3304 | 0.5413 | 0.5207 | 0.3594 |
+| Primary XGBoost LTR | 0.4006 | 0.3165 | 0.5138 | 0.5188 | 0.3518 |
+| Category-Embedding XGBoost LTR | 0.4099 | 0.3212 | 0.5321 | 0.5238 | 0.3535 |
+| Final Tail Fusion | 0.4138 | 0.3225 | 0.5321 | 0.5184 | 0.3520 |
 
 Do not claim universal SOTA. The correct claim is:
 
@@ -67,10 +68,10 @@ If raw CSV files are missing, regenerate them from the committed RDS/RDA files:
 Rscript scripts/download_completejourney.R
 ```
 
-Then build processed data:
+Then build processed data from the committed RDS/RDA files using Zixun's train-only cleaning flow:
 
 ```powershell
-python scripts/prepare_dataset.py
+python scripts/clean_completejourney.py --top-products 10000
 ```
 
 ## Reproduce The Final Model
@@ -78,7 +79,7 @@ python scripts/prepare_dataset.py
 Run the primary XGBoost ranker:
 
 ```powershell
-python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20
+python scripts/run_coupon_response_xgboost_ranker.py --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20
 Copy-Item outputs/candidates_coupon_response_xgboost_ranker.csv outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv -Force
 ```
 
@@ -89,21 +90,20 @@ python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device a
 Copy-Item outputs/candidates_coupon_response_xgboost_ranker.csv outputs/candidates_coupon_response_xgboost_ranker_pf_interval_category_embedding.csv -Force
 ```
 
-Restore the primary result, then run final tail fusion:
+Run final tail fusion. Under the regenerated Zixun-cleaned data, the category-embedding ranker is the stronger head model and validation selects `keep_primary_top=8`.
 
 ```powershell
-python scripts/run_coupon_response_xgboost_ranker.py --reuse-features --device auto --search --label-scheme pull_forward_interval --pull-forward-min-days -1 --pull-forward-max-days 2 --primary-metric recall_at_20
-python scripts/run_coupon_response_tail_fusion.py --primary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv --secondary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_category_embedding.csv --primary-metric recall_at_20 --selection-profile top10_ndcg --preserve-min-rank 7 --preserve-max-rank 12
+python scripts/run_coupon_response_tail_fusion.py --primary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_category_embedding.csv --secondary-candidates outputs/candidates_coupon_response_xgboost_ranker_pf_interval_best.csv --primary-metric recall_at_20 --selection-profile tail_recall --preserve-min-rank 7 --preserve-max-rank 12
 ```
 
 Expected final test metrics:
 
 ```text
-Recall@10                  0.4187
-NDCG@10                    0.3304
-Positive Event Hit@10      0.5413
-Recall@20                  0.5207
-NDCG@20                    0.3594
+Recall@10                  0.4138
+NDCG@10                    0.3225
+Positive Event Hit@10      0.5321
+Recall@20                  0.5184
+NDCG@20                    0.3520
 ```
 
 ## Run Checks
@@ -116,7 +116,7 @@ python -m compileall scripts src tests
 Expected current result:
 
 ```text
-35 passed
+43 passed
 compileall passes
 ```
 

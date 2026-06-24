@@ -30,7 +30,7 @@ Coupon redemption and demographics are sparse, so they are supporting signals an
 The final method has two stages:
 
 1. Candidate and response scoring with time-aware XGBoost learning-to-rank.
-2. Top-10-profile tail fusion, where validation selects `keep_primary_top=7`.
+2. Validation-selected tail fusion, where validation selects `keep_primary_top=8`.
 
 The XGBoost ranker uses:
 
@@ -47,15 +47,16 @@ The tail-fusion step keeps the strongest primary ranks and fills the remaining T
 
 | Model | Recall@10 | NDCG@10 | Positive Event Hit@10 | Recall@20 | NDCG@20 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Primary XGBoost LTR | 0.4154 | 0.3291 | 0.5321 | 0.5058 | 0.3557 |
-| Final Tail Fusion | 0.4187 | 0.3304 | 0.5413 | 0.5207 | 0.3594 |
+| Primary XGBoost LTR | 0.4006 | 0.3165 | 0.5138 | 0.5188 | 0.3518 |
+| Category-Embedding XGBoost LTR | 0.4099 | 0.3212 | 0.5321 | 0.5238 | 0.3535 |
+| Final Tail Fusion | 0.4138 | 0.3225 | 0.5321 | 0.5184 | 0.3520 |
 
 The main improvement against the earlier SOTA-candidate-only coupon baseline is:
 
 ```text
-Positive Event Hit@10: 19.27% -> 54.13%
-NDCG@10:               0.1489 -> 0.3304
-Recall@10:             0.1570 -> 0.4187
+Positive Event Hit@10: 18.35% -> 53.21%
+NDCG@10:               0.1399 -> 0.3225
+Recall@10:             0.1479 -> 0.4138
 ```
 
 ## Extension Evidence

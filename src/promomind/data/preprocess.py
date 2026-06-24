@@ -40,9 +40,18 @@ def require_columns(df: pd.DataFrame, required: Iterable[str], name: str = "data
 def clean_transactions(transactions: pd.DataFrame) -> pd.DataFrame:
     """Normalize transaction data and remove rows that cannot support modeling."""
     df = normalize_columns(transactions)
-    require_columns(df, schema.REQUIRED_TRANSACTION_COLUMNS, "transactions")
+    require_columns(
+        df,
+        [*schema.REQUIRED_TRANSACTION_COLUMNS, schema.WEEK],
+        "transactions",
+    )
 
-    for col in [schema.HOUSEHOLD_ID, schema.PRODUCT_ID, schema.BASKET_ID]:
+    key_columns = [
+        schema.HOUSEHOLD_ID,
+        schema.PRODUCT_ID,
+        schema.BASKET_ID,
+    ]
+    for col in key_columns:
         df[col] = df[col].astype("string").str.strip()
         df = df[df[col].notna() & (df[col] != "")]
 
@@ -63,6 +72,7 @@ def clean_transactions(transactions: pd.DataFrame) -> pd.DataFrame:
 
     df = df[df[schema.QUANTITY].fillna(0) > 0]
     df = df[df[schema.SALES_VALUE].fillna(-1) >= 0]
+    df = df[df[schema.WEEK].between(1, schema.DEFAULT_TEST_END_WEEK, inclusive="both")]
 
     if schema.TRANSACTION_TIMESTAMP in df.columns:
         df[schema.TRANSACTION_TIMESTAMP] = pd.to_datetime(
@@ -85,8 +95,71 @@ def clean_transactions(transactions: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("transactions needs one time column: transaction_timestamp, day, or week.")
 
     df = df[df[schema.TRANSACTION_TIMESTAMP].notna()]
+    df = df.drop_duplicates()
+
+    basket_product_keys = [
+        schema.HOUSEHOLD_ID,
+        schema.STORE_ID,
+        schema.BASKET_ID,
+        schema.PRODUCT_ID,
+        schema.WEEK,
+        schema.TRANSACTION_TIMESTAMP,
+    ]
+    basket_product_keys = [col for col in basket_product_keys if col in df.columns]
+    value_columns = [
+        schema.QUANTITY,
+        schema.SALES_VALUE,
+        schema.RETAIL_DISC,
+        schema.COUPON_DISC,
+        schema.COUPON_MATCH_DISC,
+    ]
+    value_columns = [col for col in value_columns if col in df.columns]
+    other_columns = [
+        col for col in df.columns if col not in basket_product_keys and col not in value_columns
+    ]
+    aggregations = {col: "sum" for col in value_columns}
+    aggregations.update({col: "first" for col in other_columns})
+    df = df.groupby(basket_product_keys, as_index=False, dropna=False).agg(aggregations)
+
     sort_cols = [schema.TRANSACTION_TIMESTAMP, schema.BASKET_ID, schema.PRODUCT_ID]
     return df.sort_values(sort_cols).reset_index(drop=True)
+
+
+def select_products_from_train(
+    train_transactions: pd.DataFrame,
+    min_product_purchases: int | None = None,
+    top_products: int | None = None,
+) -> pd.Index:
+    """Select catalog products using training interactions only."""
+    train = normalize_columns(train_transactions)
+    require_columns(train, [schema.PRODUCT_ID], "train_transactions")
+
+    if min_product_purchases is not None and min_product_purchases < 1:
+        raise ValueError("min_product_purchases must be at least 1.")
+    if top_products is not None and top_products < 1:
+        raise ValueError("top_products must be at least 1.")
+
+    counts = train.groupby(schema.PRODUCT_ID).size().sort_values(
+        ascending=False,
+        kind="stable",
+    )
+    keep = counts
+    if min_product_purchases is not None:
+        keep = keep[keep >= min_product_purchases]
+    if top_products is not None:
+        keep = keep.head(top_products)
+    return keep.index
+
+
+def apply_product_catalog(
+    transactions: pd.DataFrame,
+    product_ids: Iterable[str],
+) -> pd.DataFrame:
+    """Apply a preselected product catalog without learning from this split."""
+    df = normalize_columns(transactions)
+    require_columns(df, [schema.PRODUCT_ID], "transactions")
+    keep = pd.Index(product_ids, dtype="string")
+    return df[df[schema.PRODUCT_ID].astype("string").isin(keep)].reset_index(drop=True)
 
 
 def filter_frequent_products(
@@ -194,7 +267,13 @@ def build_product_features(
         product_meta[schema.PRODUCT_ID] = product_meta[schema.PRODUCT_ID].astype("string")
         features = features.merge(product_meta.drop_duplicates(schema.PRODUCT_ID), on=schema.PRODUCT_ID, how="left")
 
-    return features.fillna(0)
+    numeric_feature_columns = [
+        col
+        for col in features.columns
+        if col != schema.PRODUCT_ID and pd.api.types.is_numeric_dtype(features[col])
+    ]
+    features[numeric_feature_columns] = features[numeric_feature_columns].fillna(0)
+    return features
 
 
 def build_household_features(
@@ -221,7 +300,376 @@ def build_household_features(
         demo[schema.HOUSEHOLD_ID] = demo[schema.HOUSEHOLD_ID].astype("string")
         features = features.merge(demo.drop_duplicates(schema.HOUSEHOLD_ID), on=schema.HOUSEHOLD_ID, how="left")
 
-    return features.fillna(0)
+    numeric_feature_columns = [
+        col
+        for col in features.columns
+        if col != schema.HOUSEHOLD_ID and pd.api.types.is_numeric_dtype(features[col])
+    ]
+    features[numeric_feature_columns] = features[numeric_feature_columns].fillna(0)
+    return features
+
+
+def build_household_category_preferences(
+    transactions: pd.DataFrame,
+    products: pd.DataFrame,
+) -> pd.DataFrame:
+    """Build train-window top department and category for each household."""
+    tx = clean_transactions(transactions)
+    product_meta = normalize_columns(products)
+    require_columns(
+        product_meta,
+        [schema.PRODUCT_ID, "department", "product_category"],
+        "products",
+    )
+    product_meta = product_meta[
+        [schema.PRODUCT_ID, "department", "product_category"]
+    ].drop_duplicates(schema.PRODUCT_ID)
+    product_meta[schema.PRODUCT_ID] = product_meta[schema.PRODUCT_ID].astype("string")
+    for col in ["department", "product_category"]:
+        product_meta[col] = product_meta[col].astype("string").fillna("Unknown")
+
+    joined = tx[[schema.HOUSEHOLD_ID, schema.PRODUCT_ID]].merge(
+        product_meta,
+        on=schema.PRODUCT_ID,
+        how="left",
+    )
+    joined[["department", "product_category"]] = joined[
+        ["department", "product_category"]
+    ].fillna("Unknown")
+
+    output = joined[[schema.HOUSEHOLD_ID]].drop_duplicates().reset_index(drop=True)
+    for source_col, output_col in [
+        ("department", "top_department_train"),
+        ("product_category", "top_category_train"),
+    ]:
+        counts = (
+            joined.groupby([schema.HOUSEHOLD_ID, source_col], dropna=False)
+            .size()
+            .rename("purchase_rows")
+            .reset_index()
+            .sort_values(
+                [schema.HOUSEHOLD_ID, "purchase_rows", source_col],
+                ascending=[True, False, True],
+                kind="stable",
+            )
+        )
+        top = counts.drop_duplicates(schema.HOUSEHOLD_ID).rename(
+            columns={source_col: output_col}
+        )
+        output = output.merge(
+            top[[schema.HOUSEHOLD_ID, output_col]],
+            on=schema.HOUSEHOLD_ID,
+            how="left",
+        )
+    return output
+
+
+def add_dataset_weeks(
+    frame: pd.DataFrame,
+    date_column: str,
+    output_column: str = schema.WEEK,
+    origin: str = "2017-01-01",
+) -> pd.DataFrame:
+    """Convert Complete Journey calendar dates to canonical dataset weeks."""
+    out = normalize_columns(frame)
+    require_columns(out, [date_column], "dated table")
+    dates = pd.to_datetime(out[date_column], errors="coerce")
+    out[output_column] = ((dates - pd.Timestamp(origin)).dt.days // 7 + 1).astype(
+        "Int64"
+    )
+    return out
+
+
+def build_product_week_promotion_features(
+    promotions: pd.DataFrame,
+    product_ids: Iterable[str] | None = None,
+) -> pd.DataFrame:
+    """Aggregate store-level promotion placements to product-week features."""
+    promo = normalize_columns(promotions)
+    require_columns(
+        promo,
+        [
+            schema.PRODUCT_ID,
+            schema.STORE_ID,
+            schema.WEEK,
+            "display_location",
+            "mailer_location",
+        ],
+        "promotions",
+    )
+    promo[schema.PRODUCT_ID] = promo[schema.PRODUCT_ID].astype("string")
+    promo[schema.STORE_ID] = promo[schema.STORE_ID].astype("string")
+    promo[schema.WEEK] = pd.to_numeric(promo[schema.WEEK], errors="coerce")
+    promo = promo[
+        promo[schema.WEEK].between(1, schema.DEFAULT_TEST_END_WEEK, inclusive="both")
+    ].copy()
+    if product_ids is not None:
+        selected = pd.Index(product_ids, dtype="string")
+        promo = promo[promo[schema.PRODUCT_ID].isin(selected)]
+
+    promo["has_display_store"] = (
+        promo["display_location"].astype("string").fillna("0").ne("0")
+    )
+    promo["has_mailer_store"] = (
+        promo["mailer_location"].astype("string").fillna("0").ne("0")
+    )
+    grouped = promo.groupby([schema.PRODUCT_ID, schema.WEEK], as_index=False).agg(
+        promotion_store_count=(schema.STORE_ID, "nunique"),
+        display_store_count=("has_display_store", "sum"),
+        mailer_store_count=("has_mailer_store", "sum"),
+    )
+    grouped["has_display"] = grouped["display_store_count"].gt(0)
+    grouped["has_mailer"] = grouped["mailer_store_count"].gt(0)
+    grouped["promotion_source_count"] = (
+        grouped["has_display"].astype("int8")
+        + grouped["has_mailer"].astype("int8")
+    )
+    grouped["display_store_rate"] = (
+        grouped["display_store_count"] / grouped["promotion_store_count"].clip(lower=1)
+    )
+    grouped["mailer_store_rate"] = (
+        grouped["mailer_store_count"] / grouped["promotion_store_count"].clip(lower=1)
+    )
+    grouped["promotion_score"] = (
+        grouped["display_store_rate"] + grouped["mailer_store_rate"]
+    ) / 2
+    columns = [
+        schema.PRODUCT_ID,
+        schema.WEEK,
+        "promotion_score",
+        "has_display",
+        "has_mailer",
+        "promotion_source_count",
+        "promotion_store_count",
+        "display_store_rate",
+        "mailer_store_rate",
+    ]
+    return grouped[columns].sort_values(
+        [schema.WEEK, schema.PRODUCT_ID]
+    ).reset_index(drop=True)
+
+
+def build_household_product_coupon_features(
+    train_transactions: pd.DataFrame,
+    coupons: pd.DataFrame,
+    campaigns: pd.DataFrame,
+    campaign_descriptions: pd.DataFrame,
+    coupon_redemptions: pd.DataFrame,
+    target_start_week: int = schema.DEFAULT_TRAIN_END_WEEK + 1,
+    target_end_week: int = schema.DEFAULT_TEST_END_WEEK,
+) -> pd.DataFrame:
+    """Build sparse positive coupon signals for train-observed affinities.
+
+    The raw campaign-product mapping would expand to hundreds of millions of
+    rows. This table stores positive signals only for products a household
+    purchased during training. Missing household-product-week rows imply zero.
+    """
+    train = clean_transactions(train_transactions)
+    coupon = normalize_columns(coupons).drop_duplicates()
+    campaign = normalize_columns(campaigns).drop_duplicates()
+    descriptions = normalize_columns(campaign_descriptions).drop_duplicates()
+    redemptions = add_dataset_weeks(
+        coupon_redemptions,
+        "redemption_date",
+        output_column=schema.WEEK,
+    )
+    require_columns(
+        coupon,
+        ["coupon_upc", schema.PRODUCT_ID, "campaign_id"],
+        "coupons",
+    )
+    require_columns(
+        campaign,
+        ["campaign_id", schema.HOUSEHOLD_ID],
+        "campaigns",
+    )
+    require_columns(
+        descriptions,
+        ["campaign_id", "start_date", "end_date"],
+        "campaign_descriptions",
+    )
+
+    id_columns = {
+        "coupon_upc",
+        schema.PRODUCT_ID,
+        "campaign_id",
+        schema.HOUSEHOLD_ID,
+    }
+    for frame in [coupon, campaign, descriptions, redemptions]:
+        for col in id_columns.intersection(frame.columns):
+            frame[col] = frame[col].astype("string").str.strip()
+
+    descriptions["start_date"] = pd.to_datetime(
+        descriptions["start_date"], errors="coerce"
+    )
+    descriptions["end_date"] = pd.to_datetime(
+        descriptions["end_date"], errors="coerce"
+    )
+    origin = pd.Timestamp("2017-01-01")
+    descriptions["start_week"] = (
+        (descriptions["start_date"] - origin).dt.days // 7 + 1
+    ).clip(1, schema.DEFAULT_TEST_END_WEEK)
+    descriptions["end_week"] = (
+        (descriptions["end_date"] - origin).dt.days // 7 + 1
+    ).clip(1, schema.DEFAULT_TEST_END_WEEK)
+
+    assigned_train = campaign.merge(
+        descriptions[["campaign_id", "start_week"]],
+        on="campaign_id",
+        how="left",
+    )
+    assigned_train = assigned_train[
+        assigned_train["start_week"].le(schema.DEFAULT_TRAIN_END_WEEK)
+    ]
+    assigned_counts = assigned_train.groupby(schema.HOUSEHOLD_ID)[
+        "campaign_id"
+    ].nunique()
+    redeemed_train = redemptions[
+        redemptions[schema.WEEK].le(schema.DEFAULT_TRAIN_END_WEEK)
+    ]
+    redeemed_train = redeemed_train.merge(
+        assigned_train[[schema.HOUSEHOLD_ID, "campaign_id"]].drop_duplicates(),
+        on=[schema.HOUSEHOLD_ID, "campaign_id"],
+        how="inner",
+    )
+    redeemed_counts = redeemed_train.groupby(schema.HOUSEHOLD_ID)[
+        "campaign_id"
+    ].nunique()
+    redemption_rate = (
+        redeemed_counts.reindex(assigned_counts.index, fill_value=0)
+        / assigned_counts.clip(lower=1)
+    ).clip(0, 1)
+    redemption_rate.name = "historical_coupon_redemption_rate"
+
+    affinity = train[
+        [schema.HOUSEHOLD_ID, schema.PRODUCT_ID]
+    ].drop_duplicates()
+    eligible = affinity.merge(campaign, on=schema.HOUSEHOLD_ID, how="inner")
+    eligible = eligible.merge(
+        coupon[["campaign_id", schema.PRODUCT_ID]].drop_duplicates(),
+        on=["campaign_id", schema.PRODUCT_ID],
+        how="inner",
+    )
+    eligible = eligible.merge(
+        descriptions[["campaign_id", "start_week", "end_week"]],
+        on="campaign_id",
+        how="inner",
+    )
+    eligible["target_start_week"] = eligible["start_week"].clip(
+        lower=target_start_week
+    )
+    eligible["target_end_week"] = eligible["end_week"].clip(upper=target_end_week)
+    eligible = eligible[
+        eligible["target_start_week"].le(eligible["target_end_week"])
+    ].copy()
+    eligible[schema.WEEK] = eligible.apply(
+        lambda row: list(
+            range(int(row["target_start_week"]), int(row["target_end_week"]) + 1)
+        ),
+        axis=1,
+    )
+    eligible = eligible.explode(schema.WEEK, ignore_index=True)
+    eligible = eligible.merge(
+        redemption_rate.reset_index(),
+        on=schema.HOUSEHOLD_ID,
+        how="left",
+    )
+    eligible["historical_coupon_redemption_rate"] = eligible[
+        "historical_coupon_redemption_rate"
+    ].fillna(0.0)
+    eligible["coupon_score"] = (
+        0.75 + 0.25 * eligible["historical_coupon_redemption_rate"]
+    )
+    eligible = eligible.sort_values(
+        [
+            schema.HOUSEHOLD_ID,
+            schema.PRODUCT_ID,
+            schema.WEEK,
+            "coupon_score",
+            "start_week",
+            "campaign_id",
+        ],
+        ascending=[True, True, True, False, False, True],
+        kind="stable",
+    )
+    eligible = eligible.drop_duplicates(
+        [schema.HOUSEHOLD_ID, schema.PRODUCT_ID, schema.WEEK]
+    )
+    columns = [
+        schema.HOUSEHOLD_ID,
+        schema.PRODUCT_ID,
+        schema.WEEK,
+        "coupon_score",
+        "campaign_id",
+        "historical_coupon_redemption_rate",
+    ]
+    return eligible[columns].reset_index(drop=True)
+
+
+def build_discount_cost_features(
+    train_transactions: pd.DataFrame,
+    products: pd.DataFrame,
+) -> pd.DataFrame:
+    """Estimate product discount costs from training interactions only."""
+    train = clean_transactions(train_transactions)
+    product_meta = normalize_columns(products)
+    require_columns(
+        product_meta,
+        [schema.PRODUCT_ID, "product_category"],
+        "products",
+    )
+    product_meta = product_meta[
+        [schema.PRODUCT_ID, "product_category"]
+    ].drop_duplicates(schema.PRODUCT_ID)
+    product_meta[schema.PRODUCT_ID] = product_meta[schema.PRODUCT_ID].astype(
+        "string"
+    )
+    product_meta["product_category"] = product_meta["product_category"].astype(
+        "string"
+    ).fillna("Unknown")
+
+    discount_columns = [
+        col
+        for col in [
+            schema.RETAIL_DISC,
+            schema.COUPON_DISC,
+            schema.COUPON_MATCH_DISC,
+        ]
+        if col in train.columns
+    ]
+    train["discount_cost"] = train[discount_columns].abs().sum(axis=1)
+    joined = train.merge(product_meta, on=schema.PRODUCT_ID, how="left")
+    joined["product_category"] = joined["product_category"].fillna("Unknown")
+
+    product_discount = joined.groupby(schema.PRODUCT_ID).agg(
+        avg_product_discount_train=("discount_cost", "mean"),
+        discounted_purchase_ratio_train=("discount_cost", lambda values: values.gt(0).mean()),
+    ).reset_index()
+    category_discount = joined.groupby("product_category")["discount_cost"].mean()
+    product_discount = product_discount.merge(
+        product_meta,
+        on=schema.PRODUCT_ID,
+        how="left",
+    )
+    product_discount["avg_category_discount_train"] = product_discount[
+        "product_category"
+    ].map(category_discount)
+    product_discount["avg_category_discount_train"] = product_discount[
+        "avg_category_discount_train"
+    ].fillna(joined["discount_cost"].mean())
+    product_discount["estimated_discount_cost"] = product_discount[
+        "avg_product_discount_train"
+    ].fillna(product_discount["avg_category_discount_train"]).fillna(0.0)
+    columns = [
+        schema.PRODUCT_ID,
+        "avg_product_discount_train",
+        "avg_category_discount_train",
+        "estimated_discount_cost",
+        "discounted_purchase_ratio_train",
+    ]
+    return product_discount[columns].sort_values(schema.PRODUCT_ID).reset_index(
+        drop=True
+    )
 
 
 def join_promotion_placeholders(

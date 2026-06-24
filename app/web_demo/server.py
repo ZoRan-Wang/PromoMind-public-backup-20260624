@@ -26,6 +26,7 @@ RECOMMENDATIONS_PATH = OUTPUTS / "reranked_recommendations.csv"
 DEMO_TIMING_PATH = OUTPUTS / "demo_time_name_recommendations.csv"
 TAIL_FUSION_METRICS_PATH = OUTPUTS / "coupon_response_tail_fusion_model_comparison.csv"
 FINAL_MODEL_METRICS_PATH = OUTPUTS / "coupon_response_final_model_comparison.csv"
+HEURISTIC_METRICS_PATH = OUTPUTS / "coupon_response_heuristic_model_comparison_zixun.csv"
 TRANSACTIONS_PATH = DATA_PROCESSED / "transactions_clean.csv"
 PRODUCT_FEATURES_PATH = DATA_PROCESSED / "product_features.csv"
 HISTORY_LIMIT = 30
@@ -123,6 +124,7 @@ class DemoData:
         self.demo_timing = read_csv_rows(DEMO_TIMING_PATH)
         self.tail_metrics = read_csv_rows(TAIL_FUSION_METRICS_PATH)
         self.final_metrics = read_csv_rows(FINAL_MODEL_METRICS_PATH)
+        self.heuristic_metrics = read_csv_rows(HEURISTIC_METRICS_PATH)
         self.product_lookup = self._build_product_lookup()
         self.events = self._build_events()
         self.demo_events = self._build_demo_events()
@@ -192,7 +194,7 @@ class DemoData:
         return households
 
     def _build_metric_summary(self) -> dict[str, object]:
-        baseline = metric_row(self.final_metrics, "coupon_base_intersection", "test")
+        baseline = metric_row(self.heuristic_metrics, "coupon_base_intersection", "test")
         xgboost = metric_row(self.final_metrics, "coupon_response_xgboost_ranker", "test")
         tail_fusion = metric_row(self.tail_metrics, "coupon_response_tail_fusion", "test")
         rows = [
@@ -312,6 +314,9 @@ class DemoData:
             "history": [self.history_payload(row) for row in history],
             "recommendations": recommended,
         }
+
+    def has_event(self, event_id: str) -> bool:
+        return event_id in self.events or event_id in self.demo_events
 
     def demo_payload(self, event_id: str, coupon_slots: int) -> dict[str, object]:
         rows = self.demo_events[event_id]
@@ -469,6 +474,10 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             event_id = query["event_id"][0]
             coupon_slots = as_int(query.get("coupon_slots", ["3"])[0])
+            if not DATA.has_event(event_id):
+                self.send_response(404)
+                self.end_headers()
+                return
             self.send_json(DATA.recommendation_payload(event_id, coupon_slots))
         else:
             self.send_response(404)
